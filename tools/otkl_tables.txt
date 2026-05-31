@@ -1,0 +1,5 @@
+lemma=отключить
+ru_tables=2
+zh_tables=0
+--- table 0 rows=2 first=['Ближайшее родство', '']
+--- table 1 rows=2 first=['Список переводов', '']

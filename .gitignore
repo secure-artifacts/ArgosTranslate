@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+*.egg
+
+# Virtual environment (local dev; not in release zip)
+venv/
+.venv/
+
+# Secrets & env
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Build / dist
+build/
+dist/
+*.spec
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Large local data (language packs, models, caches — user keeps on disk)
+data/cache/
+data/local/
+data/vosk-models/
+data/config/ui_session.json
+data/config/word_lookup_notebook.json
+data/config/translation_history.json
+data/config/ui_prefs.json
+data/config/glossary_gui_prefs.json
+data/config/speech_audio.json
+
+# Test / temp
+_test_out.txt
+_wiki_snip.txt
+*.log
+downloads/
+data/logs/
+
+# Dev scratch under tools/
+tools/bkrs_*
+tools/_*
+tools/bkrs*.html
+tools/bkrs*.txt
+tools/bkrs*.json
+
+# PyInstaller
+launcher_stub.py

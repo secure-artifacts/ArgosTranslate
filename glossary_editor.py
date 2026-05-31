@@ -1,0 +1,632 @@
+"""
+术语库：源语词条 → 多目标语字段（zh_glossary.json）。
+界面：选择语言对，批量添加/删除，导入/导出。
+"""
+from __future__ import annotations
+
+import csv
+import io
+import json
+import sys
+import threading
+from collections import Counter
+from pathlib import Path
+
+_root = Path(__file__).resolve().parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+import terminology_bridge as tb
+
+from glossary_manager import GlossaryStore, infer_pos_for_target
+
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QKeySequence
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QShortcut,
+    QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QHeaderView,
+)
+
+
+def _prefs_path() -> Path:
+    return _root / "data" / "config" / "glossary_gui_prefs.json"
+
+
+def _load_prefs() -> dict:
+    p = _prefs_path()
+    if not p.is_file():
+        return {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_prefs(patch: dict) -> None:
+    data = _load_prefs()
+    data.update(patch)
+    p = _prefs_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def load_open_on_startup() -> bool:
+    return bool(_load_prefs().get("open_glossary_on_startup", False))
+
+
+def save_open_on_startup(enabled: bool) -> None:
+    _save_prefs({"open_glossary_on_startup": enabled})
+
+
+def load_lang_pair_prefs() -> tuple[str, str]:
+    d = _load_prefs()
+    src = (d.get("src_lang") or "zh").strip().lower()
+    tgt = (d.get("tgt_lang") or "ru").strip().lower()
+    return src, tgt
+
+
+def save_lang_pair_prefs(src_lang: str, tgt_lang: str) -> None:
+    _save_prefs(
+        {
+            "src_lang": (src_lang or "zh").strip().lower(),
+            "tgt_lang": (tgt_lang or "ru").strip().lower(),
+        }
+    )
+
+
+def _normalize_pos(raw_pos: str) -> str:
+    value = (raw_pos or "").strip().lower()
+    if value in {"verb", "v", "动词"}:
+        return "verb"
+    if value in {"adj", "adjective", "a", "形容词"}:
+        return "adj"
+    if value in {"other", "phrase", "短语", "其他"}:
+        return "other"
+    return "noun"
+
+
+class BulkAddDialog(QDialog):
+    def __init__(self, src_label: str, tgt_label: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("批量添加术语")
+        self.setMinimumSize(520, 360)
+        hint = QLabel(
+            f"每行一条：{src_label}<Tab>{tgt_label}；"
+            f"可选第三列词性（俄语/乌语时有效）。"
+        )
+        hint.setWordWrap(True)
+        self.edit = QPlainTextEdit()
+        self.edit.setPlaceholderText("从 Excel 复制多行后粘贴…")
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addWidget(hint)
+        lay.addWidget(self.edit, 1)
+        lay.addWidget(buttons)
+
+    def raw_text(self) -> str:
+        return self.edit.toPlainText().strip()
+
+
+class GlossaryEditorDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(720, 480)
+        self.resize(860, 560)
+
+        self._lang_choices = tb.list_glossary_language_choices()
+        self._code_to_label = dict(self._lang_choices)
+
+        pref_src, pref_tgt = load_lang_pair_prefs()
+
+        pair_row = QHBoxLayout()
+        pair_row.addWidget(QLabel("源语言"))
+        self.src_lang_combo = QComboBox()
+        self.tgt_lang_combo = QComboBox()
+        for code, label in self._lang_choices:
+            self.src_lang_combo.addItem(label, code)
+            self.tgt_lang_combo.addItem(label, code)
+        self._set_combo_code(self.src_lang_combo, pref_src)
+        self._set_combo_code(self.tgt_lang_combo, pref_tgt)
+        self.src_lang_combo.currentIndexChanged.connect(self._on_lang_pair_changed)
+        self.tgt_lang_combo.currentIndexChanged.connect(self._on_lang_pair_changed)
+        pair_row.addWidget(self.src_lang_combo, 1)
+        pair_row.addWidget(QLabel("→"))
+        pair_row.addWidget(self.tgt_lang_combo, 1)
+
+        self.hint = QLabel()
+        self.hint.setObjectName("HintLabel")
+        self.hint.setWordWrap(True)
+        self._refresh_hint()
+
+        self.table = QTableWidget(0, 2)
+        hdr = self.table.horizontalHeader()
+        hdr.setStretchLastSection(True)
+        hdr.setSectionResizeMode(0, QHeaderView.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().setDefaultSectionSize(28)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._update_table_headers()
+
+        btn_bulk = QPushButton("批量添加…")
+        btn_bulk.clicked.connect(self._on_bulk_add)
+        btn_del = QPushButton("删除选中")
+        btn_del.clicked.connect(self.delete_selected_rows)
+        btn_clear_all = QPushButton("删除全部…")
+        btn_clear_all.clicked.connect(self.clear_all_entries)
+        btn_import = QPushButton("导入…")
+        btn_import.clicked.connect(self.import_table_file)
+        btn_export = QPushButton("导出…")
+        btn_export.clicked.connect(self.export_csv_file)
+
+        row_tools = QHBoxLayout()
+        row_tools.setSpacing(8)
+        row_tools.addWidget(btn_bulk)
+        row_tools.addWidget(btn_del)
+        row_tools.addWidget(btn_clear_all)
+        row_tools.addWidget(btn_import)
+        row_tools.addWidget(btn_export)
+        row_tools.addStretch()
+
+        btn_save = QPushButton("保存")
+        btn_save.setDefault(True)
+        btn_save.clicked.connect(lambda: self.save_to_file())
+        btn_close = QPushButton("关闭")
+        btn_close.clicked.connect(self.hide)
+
+        bottom = QHBoxLayout()
+        bottom.addStretch()
+        bottom.addWidget(btn_save)
+        bottom.addWidget(btn_close)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+        layout.addLayout(pair_row)
+        layout.addWidget(self.hint)
+        layout.addWidget(self.table, 1)
+        layout.addLayout(row_tools)
+        layout.addLayout(bottom)
+        self.setLayout(layout)
+
+        try:
+            import portable_ui_theme as put
+
+            btn_save.setObjectName("PrimaryButton")
+            btn_bulk.setObjectName("AccentButton")
+            btn_import.setObjectName("AccentButton")
+            btn_del.setObjectName("DangerButton")
+            btn_clear_all.setObjectName("DangerButton")
+            btn_close.setObjectName("GhostButton")
+            for b in (
+                btn_save,
+                btn_bulk,
+                btn_import,
+                btn_export,
+                btn_del,
+                btn_clear_all,
+                btn_close,
+            ):
+                put.polish_widget(b)
+            put.polish_widget(self.hint)
+        except ImportError:
+            pass
+
+        sc_save = QShortcut(QKeySequence.Save, self)
+        sc_save.activated.connect(self.save_to_file)
+
+        self._update_window_title()
+        self.reload_from_file()
+
+    @staticmethod
+    def _set_combo_code(combo: QComboBox, code: str) -> None:
+        want = (code or "").strip().lower()
+        for i in range(combo.count()):
+            if combo.itemData(i) == want:
+                combo.setCurrentIndex(i)
+                return
+        if combo.count():
+            combo.setCurrentIndex(0)
+
+    def _src_code(self) -> str:
+        return (self.src_lang_combo.currentData() or "zh").strip().lower()
+
+    def _tgt_code(self) -> str:
+        return (self.tgt_lang_combo.currentData() or "ru").strip().lower()
+
+    def _src_label(self) -> str:
+        return self._code_to_label.get(self._src_code(), self._src_code())
+
+    def _tgt_label(self) -> str:
+        return self._code_to_label.get(self._tgt_code(), self._tgt_code())
+
+    def _update_window_title(self) -> None:
+        self.setWindowTitle(
+            f"术语库（{self._src_label()} → {self._tgt_label()}）"
+        )
+
+    def _update_table_headers(self) -> None:
+        self.table.setHorizontalHeaderLabels(
+            [f"源语（{self._src_label()}）", f"译文（{self._tgt_label()}）"]
+        )
+
+    def _refresh_hint(self) -> None:
+        text = (
+            f"编辑当前语言对「{self._src_label()} → {self._tgt_label()}」的术语；"
+            "其它语言的译文保存在同一条目中，切换语言对即可查看。"
+            "表格改字后点「保存」。"
+        )
+        if self._tgt_code() in ("ru", "uk"):
+            text += (
+                "\n俄/乌语译文可填任意词形（不必原形）；保存时将自动识别各词格并规范为词典原形。"
+            )
+        if self._tgt_code() == "uk":
+            try:
+                import glossary_inflection as gi
+
+                if not gi.uk_morph_analyzer_available():
+                    text += (
+                        "\n\n乌克兰语自动变格需安装 pymorphy2-dicts-uk。"
+                        "在程序目录终端运行：\n"
+                        f"{gi.uk_morph_install_command()}\n"
+                        "安装后请重启程序。"
+                    )
+            except ImportError:
+                pass
+        self.hint.setText(text)
+
+    def _on_lang_pair_changed(self) -> None:
+        save_lang_pair_prefs(self._src_code(), self._tgt_code())
+        self._update_window_title()
+        self._update_table_headers()
+        self._refresh_hint()
+        self.reload_from_file()
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.hide()
+
+    def _build_bulk_entries(
+        self, raw_text: str, tgt_lang: str
+    ) -> tuple[list[tuple[str, str, str]], list[int]]:
+        entries: list[tuple[str, str, str]] = []
+        bad: list[int] = []
+        reader = csv.reader(io.StringIO(raw_text), delimiter="\t", quotechar='"')
+        for line_number, columns in enumerate(reader, start=1):
+            cleaned = [item.strip().strip("\ufeff") for item in columns]
+            if not any(cleaned):
+                continue
+            if len(cleaned) < 2:
+                bad.append(line_number)
+                continue
+            src, tgt = cleaned[0], cleaned[1]
+            pos_raw = cleaned[2] if len(cleaned) >= 3 else ""
+            pos = (
+                _normalize_pos(pos_raw)
+                if pos_raw
+                else infer_pos_for_target(tgt, tgt_lang)
+            )
+            if not src or not tgt:
+                bad.append(line_number)
+                continue
+            entries.append((src, tgt, pos))
+        return entries, bad
+
+    def _on_bulk_add(self) -> None:
+        dlg = BulkAddDialog(self._src_label(), self._tgt_label(), self)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        raw = dlg.raw_text()
+        if not raw:
+            return
+        tgt_lang = self._tgt_code()
+        entries, bad_lines = self._build_bulk_entries(raw, tgt_lang)
+        if not entries:
+            QMessageBox.warning(
+                self,
+                "批量添加",
+                "没有有效行。请确认每行至少有两列（制表符分隔）。",
+            )
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            gs = GlossaryStore().load()
+            for src, tgt, pos in entries:
+                gs.upsert_term(src, tgt_lang, tgt, pos=pos)
+            gs.save()
+        except OSError as e:
+            QMessageBox.warning(self, "保存失败", str(e))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.reload_from_file()
+        msg = f"已添加 {len(entries)} 条（{self._src_label()} → {self._tgt_label()}）。"
+        if bad_lines:
+            preview = ", ".join(str(i) for i in bad_lines[:12])
+            if len(bad_lines) > 12:
+                preview += " …"
+            msg += f"\n格式不完整行号: {preview}"
+        QMessageBox.information(self, "批量添加", msg)
+
+    def reload_from_file(self) -> None:
+        data = tb.load_glossary()
+        tgt_lang = self._tgt_code()
+        keys = [
+            k
+            for k in sorted(data.keys(), key=lambda s: (len(s), s), reverse=True)
+            if isinstance(k, str) and k.strip()
+        ]
+        n = len(keys) + 1
+        self.table.blockSignals(True)
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.setRowCount(n)
+            for row, src in enumerate(keys):
+                entry = data[src]
+                tgt_show = tb.target_cell_text(entry, tgt_lang)
+                self.table.setItem(row, 0, QTableWidgetItem(src))
+                self.table.setItem(row, 1, QTableWidgetItem(tgt_show))
+            last = n - 1
+            self.table.setItem(last, 0, QTableWidgetItem(""))
+            self.table.setItem(last, 1, QTableWidgetItem(""))
+        finally:
+            self.table.setUpdatesEnabled(True)
+            self.table.blockSignals(False)
+
+    def delete_selected_rows(self) -> None:
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
+        if not rows:
+            QMessageBox.information(self, "删除", "请先选中要删除的行。")
+            return
+        tgt_lang = self._tgt_code()
+        to_remove: list[str] = []
+        for r in rows:
+            it0 = self.table.item(r, 0)
+            it1 = self.table.item(r, 1)
+            src = (it0.text() if it0 else "").strip()
+            tgt = (it1.text() if it1 else "").strip()
+            if src and tgt:
+                to_remove.append(src)
+        if not to_remove:
+            for r in rows:
+                self.table.removeRow(r)
+            return
+        confirm = QMessageBox.question(
+            self,
+            "删除选中",
+            f"确定删除 {len(to_remove)} 条「{self._tgt_label()}」译文吗？\n"
+            "（源语词条与其它语言的译文会保留。）",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+        try:
+            gs = GlossaryStore().load()
+            for src in to_remove:
+                gs.remove_target(src, tgt_lang)
+            gs.save()
+        except OSError as e:
+            QMessageBox.warning(self, "保存失败", str(e))
+            return
+        self.reload_from_file()
+        QMessageBox.information(self, "删除", f"已删除 {len(to_remove)} 条译文。")
+
+    def clear_all_entries(self) -> None:
+        """清空术语库文件中的全部条目（所有语言对）。"""
+        data = tb.load_glossary()
+        n_total = len(data)
+        if n_total == 0:
+            QMessageBox.information(self, "删除全部", "术语库已是空的。")
+            return
+        n_pair = sum(
+            1
+            for entry in data.values()
+            if tb.target_cell_text(entry, self._tgt_code()).strip()
+        )
+        confirm = QMessageBox.question(
+            self,
+            "删除全部术语",
+            f"确定删除全部 {n_total} 条术语吗？\n"
+            f"（当前语言对「{self._src_label()} → {self._tgt_label()}」显示 {n_pair} 条。）\n\n"
+            f"此操作不可撤销，将清空：\n{tb.glossary_path()}",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+        try:
+            GlossaryStore().load().clear_all().save()
+        except OSError as e:
+            QMessageBox.warning(self, "保存失败", str(e))
+            return
+        try:
+            import glossary_manager as gm
+
+            def _reindex_glossary() -> None:
+                gm.preload_morph_analyzer()
+                gm.build_ru_lemma_index({})
+
+            threading.Thread(
+                target=_reindex_glossary, name="glossary-reindex", daemon=True
+            ).start()
+        except Exception:
+            pass
+        self.reload_from_file()
+        QMessageBox.information(
+            self,
+            "删除全部",
+            f"已删除全部 {n_total} 条术语并已保存。",
+        )
+
+    def export_csv_file(self) -> None:
+        src_code = self._src_code()
+        tgt_code = self._tgt_code()
+        default_name = f"glossary_{src_code}_{tgt_code}.csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出 CSV",
+            str(_root / default_name),
+            "CSV (*.csv);;所有文件 (*.*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(
+                    [
+                        f"源语({self._src_label()})",
+                        f"译文({self._tgt_label()})",
+                        f"src_lang={src_code}",
+                        f"tgt_lang={tgt_code}",
+                    ]
+                )
+                for r in range(self.table.rowCount()):
+                    it0 = self.table.item(r, 0)
+                    it1 = self.table.item(r, 1)
+                    src = (it0.text() if it0 else "").strip()
+                    tgt = (it1.text() if it1 else "").strip()
+                    if not src and not tgt:
+                        continue
+                    w.writerow([src, tgt])
+        except OSError as e:
+            QMessageBox.warning(self, "导出失败", str(e))
+            return
+        QMessageBox.information(self, "导出", f"已写入：\n{path}")
+
+    def import_table_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"导入表格（第1列{self._src_label()}，第2列{self._tgt_label()}）",
+            str(_root),
+            "表格 (*.csv *.xlsx);;CSV (*.csv);;Excel (*.xlsx);;所有文件 (*.*)",
+        )
+        if not path:
+            return
+        p = Path(path)
+        tgt_lang = self._tgt_code()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            gs = GlossaryStore().load()
+            if p.suffix.lower() == ".xlsx":
+                n = gs.import_xlsx(p, merge=True, target_lang=tgt_lang)
+            else:
+                n = gs.import_csv_pair(p, target_lang=tgt_lang, merge=True)
+            gs.save()
+        except Exception as e:
+            QMessageBox.warning(self, "导入失败", str(e))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.reload_from_file()
+        QMessageBox.information(
+            self,
+            "导入",
+            f"已合并导入 {n} 行（→ {self._tgt_label()}）并保存。",
+        )
+
+    def save_to_file(self, *, show_message: bool = True) -> bool:
+        old_all = tb.load_glossary()
+        tgt_lang = self._tgt_code()
+        new_data: dict = {k: v for k, v in old_all.items() if isinstance(k, str)}
+        src_counts: Counter[str] = Counter()
+
+        for r in range(self.table.rowCount()):
+            it0 = self.table.item(r, 0)
+            it1 = self.table.item(r, 1)
+            src = (it0.text() if it0 else "").strip()
+            tgt_raw = (it1.text() if it1 else "").strip()
+            if not src:
+                continue
+            if not tgt_raw:
+                gs_entry = old_all.get(src)
+                if isinstance(gs_entry, dict) and tgt_lang in gs_entry:
+                    merged = dict(gs_entry)
+                    merged.pop(tgt_lang, None)
+                    if merged:
+                        new_data[src] = merged
+                    else:
+                        new_data.pop(src, None)
+                continue
+            src_counts[src] += 1
+            tgt_val = tb.parse_target_cell(tgt_raw, tgt_lang)
+            old = old_all.get(src)
+            if isinstance(old, dict):
+                merged = {**old, tgt_lang: tgt_val}
+            elif isinstance(old, str) and tgt_lang == "ru":
+                merged = {"ru": old, tgt_lang: tgt_val}
+            else:
+                merged = {tgt_lang: tgt_val}
+            if tgt_lang in ("ru", "uk"):
+                merged["pos"] = infer_pos_for_target(tgt_raw, tgt_lang)
+            new_data[src] = merged
+
+        dup = sorted(z for z, c in src_counts.items() if c > 1)
+        if dup:
+            preview = "、".join(dup[:12])
+            if len(dup) > 12:
+                preview += "…"
+            QMessageBox.warning(
+                self,
+                "重复的源语",
+                f"以下源语出现多行，已按最后一行写入（共 {len(dup)} 个）：\n{preview}",
+            )
+        try:
+            tb.save_glossary(new_data)
+        except OSError as e:
+            QMessageBox.warning(self, "保存失败", str(e))
+            return False
+        if tgt_lang == "ru":
+            try:
+                import glossary_manager as gm
+
+                data_copy = dict(new_data)
+
+                def _reindex_glossary() -> None:
+                    gm.preload_morph_analyzer()
+                    gm.build_ru_lemma_index(data_copy)
+
+                threading.Thread(
+                    target=_reindex_glossary, name="glossary-reindex", daemon=True
+                ).start()
+            except Exception:
+                pass
+        if show_message:
+            n_pair = sum(
+                1
+                for e in new_data.values()
+                if tb.target_cell_text(e, tgt_lang).strip()
+            )
+            QMessageBox.information(
+                self,
+                "已保存",
+                f"已写入：\n{tb.glossary_path()}\n\n"
+                f"当前「{self._tgt_label()}」共 {n_pair} 条；文件总键数 {len(new_data)}。",
+            )
+        self.reload_from_file()
+        return True

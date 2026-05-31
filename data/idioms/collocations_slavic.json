@@ -1,0 +1,217 @@
+{
+  "meta": {
+    "sources": [
+      "Sussex Russian Language Project — Blok Grammar (CC academic use)",
+      "Wiktionary / Wiktextract (CC BY-SA 3.0) — https://en.wiktionary.org",
+      "OpenRussian.org collocation patterns (CC BY-SA)",
+      "Tatoeba.org sentence pairs (CC BY 2.0 FR)",
+      "Oxford Russian Grammar and Verbs (reference)",
+      "MasterRussian.net verb+case lists (reference)"
+    ],
+    "description": "Target-side Slavic collocation and idiom repairs for MT output"
+  },
+  "ru": [
+    {
+      "wrong": "принимать место",
+      "right": "происходить",
+      "note": "take place — Tatoeba / Oxford calque fix"
+    },
+    {
+      "wrong": "делать фото",
+      "right": "фотографировать",
+      "note": "OpenRussian / Wiktionary usage"
+    },
+    {
+      "wrong": "принимает место",
+      "right": "происходит",
+      "note": "finite verb calque"
+    },
+    {
+      "wrong": "делает фото",
+      "right": "фотографирует",
+      "note": "finite verb calque"
+    },
+    {
+      "wrong": "имеет место",
+      "right": "происходит",
+      "note": "formal finite calque"
+    },
+    {
+      "wrong": "иметь место",
+      "right": "происходить",
+      "note": "formal register calque"
+    },
+    {
+      "wrong": "оказывать влияние в",
+      "right": "оказывать влияние на",
+      "note": "Sussex — влиять на + ACC"
+    },
+    {
+      "wrong": "обращать внимание в",
+      "right": "обращать внимание на",
+      "note": "Sussex — обращать внимание на + ACC"
+    },
+    {
+      "wrong": "принимать участие на",
+      "right": "принимать участие в",
+      "note": "Wiktionary — участвовать в + LOCT"
+    },
+    {
+      "wrong": "принимает участие на",
+      "right": "принимает участие в",
+      "note": "finite verb + prep"
+    },
+    {
+      "wrong": "состоять из из",
+      "right": "состоять из",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "зависеть от от",
+      "right": "зависеть от",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "по сравнению с с",
+      "right": "по сравнению с",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "согласно с",
+      "right": "согласно",
+      "note": "Sussex — согласно + DAT (no с)"
+    },
+    {
+      "wrong": "благодаря за",
+      "right": "благодаря",
+      "note": "Sussex — благодаря + DAT"
+    },
+    {
+      "wrong": "в течении",
+      "right": "в течение",
+      "note": "Wiktionary spelling"
+    },
+    {
+      "wrong": "несмотря на на",
+      "right": "несмотря на",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "с точки зрения на",
+      "right": "с точки зрения",
+      "note": "Wiktionary fixed phrase"
+    },
+    {
+      "wrong": "при помощи с",
+      "right": "при помощи",
+      "note": "instrumental construction"
+    },
+    {
+      "wrong": "делать решение",
+      "right": "принимать решение",
+      "note": "Oxford — make a decision calque"
+    },
+    {
+      "wrong": "делает решение",
+      "right": "принимает решение",
+      "note": "finite calque"
+    },
+    {
+      "wrong": "брать в consideration",
+      "right": "принимать во внимание",
+      "note": "English calque — Tatoeba/Oxford"
+    },
+    {
+      "wrong": "take into account",
+      "right": "принимать во внимание",
+      "note": "English calque"
+    },
+    {
+      "wrong": "на основе на",
+      "right": "на основе",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "в соответствии с с",
+      "right": "в соответствии с",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "в связи с с",
+      "right": "в связи с",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "оказывать давление на на",
+      "right": "оказывать давление на",
+      "note": "duplicate prep"
+    }
+  ],
+  "uk": [
+    {
+      "wrong": "приймати місце",
+      "right": "відбуватися",
+      "note": "take place calque — Tatoeba"
+    },
+    {
+      "wrong": "робити фото",
+      "right": "фотографувати",
+      "note": "OpenRussian usage"
+    },
+    {
+      "wrong": "мати місце",
+      "right": "відбуватися",
+      "note": "formal calque"
+    },
+    {
+      "wrong": "впливати в",
+      "right": "впливати на",
+      "note": "Read Ukrainian — впливати на + ACC"
+    },
+    {
+      "wrong": "звертати увагу в",
+      "right": "звертати увагу на",
+      "note": "Read Ukrainian collocation"
+    },
+    {
+      "wrong": "брати участь на",
+      "right": "брати участь у",
+      "note": "Wiktionary — брати участь у + LOCT"
+    },
+    {
+      "wrong": "складатися з з",
+      "right": "складатися з",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "залежати від від",
+      "right": "залежати від",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "порівняно з з",
+      "right": "порівняно з",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "робить рішення",
+      "right": "приймає рішення",
+      "note": "make decision calque"
+    },
+    {
+      "wrong": "приймає участь на",
+      "right": "бере участь у",
+      "note": "finite + prep"
+    },
+    {
+      "wrong": "на основі на",
+      "right": "на основі",
+      "note": "duplicate prep"
+    },
+    {
+      "wrong": "відповідно до до",
+      "right": "відповідно до",
+      "note": "duplicate prep"
+    }
+  ]
+}

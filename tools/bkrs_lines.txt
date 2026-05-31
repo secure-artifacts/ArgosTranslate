@@ -1,0 +1,11 @@
+﻿d:\redownload\ruanjian\ArgosTranslate\venv\Scripts\python.exe : Traceback (most recent call last):
+At C:\Users\melo\AppData\Local\Temp\ps-script-de9857d9-1bc9-4c9a-b057-439ce9e195a8.ps1:82 char:1
++ d:\redownload\ruanjian\ArgosTranslate\venv\Scripts\python.exe -c "imp ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<string>", line 1, in <module>
+  File "D:\WKLZHONYING\python\3.10.11\lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode character '\u5403' in position 3: character maps to <undefined>

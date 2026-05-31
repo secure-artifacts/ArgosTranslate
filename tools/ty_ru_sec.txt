@@ -1,0 +1,1 @@
+morfotable_in_ru_section=0

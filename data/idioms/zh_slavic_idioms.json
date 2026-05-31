@@ -1,0 +1,59 @@
+{
+  "meta": {
+    "sources": [
+      "Tatoeba.org CC BY 2.0 FR — https://tatoeba.org",
+      "Wiktionary idioms (CC BY-SA 3.0)",
+      "MDBG / CC-CEDICT public domain components for gloss alignment"
+    ],
+    "description": "Chinese source phrase hints → Russian/Ukrainian idiomatic targets (post-check when source available)"
+  },
+  "zh_ru": [
+    {"zh": "没关系", "ru": "ничего страшного", "note": "Tatoeba"},
+    {"zh": "不用谢", "ru": "не за что", "note": "Tatoeba"},
+    {"zh": "怎么办", "ru": "что делать", "note": "Wiktionary idiom pattern"},
+    {"zh": "随便", "ru": "как угодно", "note": "Tatoeba"},
+    {"zh": "当然", "ru": "конечно", "note": "high-frequency"},
+    {"zh": "实际上", "ru": "на самом деле", "note": "Oxford calque fix"},
+    {"zh": "一般来说", "ru": "как правило", "note": "Wiktionary"},
+    {"zh": "换句话说", "ru": "другими словами", "note": "Tatoeba"},
+    {"zh": "一方面", "ru": "с одной стороны", "note": "Wiktionary"},
+    {"zh": "另一方面", "ru": "с другой стороны", "note": "Wiktionary"},
+    {"zh": "总的来说", "ru": "в целом", "note": "Tatoeba"},
+    {"zh": "首先", "ru": "прежде всего", "note": "discourse marker"},
+    {"zh": "最后", "ru": "наконец", "note": "discourse marker"},
+    {"zh": "例如", "ru": "например", "note": "Wiktionary"},
+    {"zh": "尤其是", "ru": "особенно", "note": "Tatoeba"},
+    {"zh": "目前", "ru": "в настоящее время", "note": "professional register"},
+    {"zh": "根据", "ru": "в соответствии с", "note": "legal/business — Sussex"},
+    {"zh": "由于", "ru": "в связи с", "note": "formal cause"},
+    {"zh": "关于", "ru": "относительно", "note": "Wiktionary"},
+    {"zh": "此外", "ru": "кроме того", "note": "discourse"},
+    {"zh": "因此", "ru": "поэтому", "note": "discourse"},
+    {"zh": "然而", "ru": "однако", "note": "discourse"},
+    {"zh": "总之", "ru": "в заключение", "note": "formal summary"},
+    {"zh": "值得注意的是", "ru": "следует отметить", "note": "academic register"}
+  ],
+  "zh_uk": [
+    {"zh": "没关系", "uk": "нічого страшного", "note": "Tatoeba"},
+    {"zh": "不用谢", "uk": "немає за що", "note": "Tatoeba"},
+    {"zh": "怎么办", "uk": "що робити", "note": "Wiktionary"},
+    {"zh": "随便", "uk": "як завгодно", "note": "Tatoeba"},
+    {"zh": "当然", "uk": "звісно", "note": "high-frequency"},
+    {"zh": "实际上", "uk": "насправді", "note": "Oxford calque fix"},
+    {"zh": "一般来说", "uk": "як правило", "note": "Wiktionary"},
+    {"zh": "换句话说", "uk": "іншими словами", "note": "Tatoeba"},
+    {"zh": "一方面", "uk": "з одного боку", "note": "Wiktionary"},
+    {"zh": "另一方面", "uk": "з іншого боку", "note": "Wiktionary"},
+    {"zh": "总的来说", "uk": "загалом", "note": "Tatoeba"},
+    {"zh": "例如", "uk": "наприклад", "note": "Wiktionary"},
+    {"zh": "尤其是", "uk": "особливо", "note": "Tatoeba"},
+    {"zh": "目前", "uk": "наразі", "note": "professional register"},
+    {"zh": "根据", "uk": "відповідно до", "note": "Read Ukrainian"},
+    {"zh": "由于", "uk": "у зв'язку з", "note": "formal cause"},
+    {"zh": "关于", "uk": "стосовно", "note": "Wiktionary"},
+    {"zh": "此外", "uk": "крім того", "note": "discourse"},
+    {"zh": "因此", "uk": "тому", "note": "discourse"},
+    {"zh": "然而", "uk": "однак", "note": "discourse"},
+    {"zh": "总之", "uk": "на завершення", "note": "formal summary"}
+  ]
+}

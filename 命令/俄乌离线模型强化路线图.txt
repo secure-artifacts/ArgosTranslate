@@ -1,0 +1,47 @@
+俄 / 乌 Argos 离线翻译强化路线图（与仓库脚本对应）
+========================================
+说明：本文件落实「数据清洗 → 自有 NMT 训练 → 可选更强基座」；无法单靠 GUI 把默认小包变成 DeepL。
+
+一、已在便携版里能做的（推理侧）
+--------------------------------
+• data\config\argos-translate\settings.json：beam、解码长度、coverage 等（见 使用说明.txt）。
+• translation_quality.py：俄/乌译文排版与部分句式修补；中文「什么是…？」对齐修补等。
+• 术语库 zh_glossary.json：中文源时专名一致；俄↔乌专名需依赖模型或自建 ru↔uk 平行语料训练。
+
+二、数据驱动（推荐优先）
+--------------------------------
+1）中文–俄语：可选在 offline_translator\offline_training_template 下运行
+   scripts\download_opus_wikimatrix_zh_ru.py
+   从欧洲节点（opus.nlpl.eu + object.pouta.csc.fi）自动拉取 OPUS WikiMatrix 中俄句对，
+   生成 corpus_data\opus_wikimatrix_ru_zh\raw.zh 与 raw.ru；脚本拒绝 .cn 等中国大陆常见镜像主机。
+2）收集 ru–uk 平行句对（OPUS、WMT、Tatoeba、机构双语稿等；注意版权）。
+3）在 offline_translator\offline_training_template 下使用强化清洗：
+   .\.venv\Scripts\python.exe .\scripts\enhance_parallel_corpus.py ^
+     --src D:\data\raw.ru --tgt D:\data\raw.uk ^
+     --out-src D:\data\clean.ru --out-tgt D:\data\clean.uk --pair ru-uk
+   （可调 --min-cyrillic-ratio、--max-len-ratio、--max-chars）
+4）一键双向训练并打 Argos 包（需已安装 OpenNMT/CT2 训练环境，见该目录 README）：
+   .\run_ru_uk_bidirectional.ps1 -RawRuPath "D:\data\raw.ru" -RawUkPath "D:\data\raw.uk"
+   输出在 bundled_models\translate-ru_uk-* 与 translate-uk_ru-*；再装入 ArgosTranslate\data\local\...\packages。
+
+三、回译数据增强（方案阶段二）
+--------------------------------
+• 用高质量 uk 单语 + 已有 uk→ru 模型生成「合成 ru」，与真实 uk 组成句对，混入训练集（注意合成噪声上限）。
+• 或反向：ru 单语 + ru→uk 合成数据。脚本层不强制绑定某一云端模型；可用任意强模型离线批量生成后接 enhance_parallel_corpus。
+
+四、NLLB-200 等更强基座（方案阶段一）
+--------------------------------
+• NLLB 权重与许可以 Meta 发布为准（如 CC-BY-NC）；CTranslate2 转换可参考 OpenNMT 论坛「NLLB-200 with CTranslate2」讨论帖。
+• 转换得到 CT2 目录 + SentencePiece 后，可用本仓库 scripts\build_argos_model.py 打成 .argosmodel（与现有 Argos 包结构一致）。
+• 注意：NLLB 分词与 Argos 默认 OpenNMT 小包不同，不能直接替换旧包文件而不改 metadata 与 spm。
+
+五、领域微调（方案阶段三）
+--------------------------------
+• 在通用 ru–uk 模型 checkpoint 上继续 onmt_train（增量数据或 curriculum）；本模板已有 run_domain_curriculum*.ps1 可参考流程。
+• 法律/医疗等请优先「领域内平行句 + 术语表」，再谈加大模型。
+
+六、评估
+--------------------------------
+• 固定 dev 集算 BLEU/chrF++；有条件可加 COMET-Kiwi 等无参考指标做回归对比。
+
+参考文献与链接见用户方案原文（Argos、OPUS、WMT、Meta NLLB、OpenNMT CT2 教程等）。

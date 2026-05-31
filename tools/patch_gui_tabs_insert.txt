@@ -1,0 +1,112 @@
+
+    def _iter_tabs(self):
+        for i in range(self._tab_widget.count()):
+            w = self._tab_widget.widget(i)
+            if w is not None:
+                yield w
+
+    def _add_translation_tab(self, speech_prefs=None) -> None:
+        if self._tab_cls is None:
+            return
+        self._tab_serial += 1
+        tab = self._tab_cls(self, self._tab_serial, speech_prefs=speech_prefs)
+        self._tabs.append(tab)
+        idx = self._tab_widget.addTab(tab, tab.default_tab_title())
+        self._tab_widget.setCurrentIndex(idx)
+        if self.languages:
+            tab.apply_language_combos(run_translate=False)
+        tab.refresh_tab_title()
+
+    def _on_tab_close_requested(self, index: int) -> None:
+        if self._tab_widget.count() <= 1:
+            QMessageBox.information(self, "标签页", "至少保留一个翻译标签页。")
+            return
+        tab = self._tab_widget.widget(index)
+        if tab is not None:
+            tab.shutdown()
+            if tab in self._tabs:
+                self._tabs.remove(tab)
+        self._tab_widget.removeTab(index)
+        if tab is not None:
+            tab.deleteLater()
+
+    def _on_tab_current_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        for i in range(self._tab_widget.count()):
+            w = self._tab_widget.widget(i)
+            if w is None:
+                continue
+            if i == index:
+                w.on_tab_activated()
+            else:
+                w.on_tab_deactivated()
+
+    def _pause_other_tabs_speech(self, active_tab) -> None:
+        for tab in self._iter_tabs():
+            if tab is active_tab:
+                continue
+            tab.on_tab_deactivated()
+            w = getattr(tab, "_offline_speech_worker", None)
+            if w is not None and w.isRunning() and w.is_recording_allowed():
+                w.pause_recording()
+
+    def _fill_chrome_version_subtitle(self) -> None:
+        sub = getattr(self, "_chrome_title_sub", None)
+        if sub is None or self._portable_root is None:
+            return
+        ver_mod = _import_app_version_module()
+        if ver_mod is None:
+            return
+        ver = ver_mod.format_version_label(self._portable_root)
+        if ver:
+            sub.setText(f"Argos Translate · {ver}")
+
+    def _refresh_chrome_dark_label(self) -> None:
+        if self._portable_root is None:
+            return
+        theme = self._portable_root / "portable_ui_theme.py"
+        if not theme.is_file():
+            return
+        try:
+            spec = importlib.util.spec_from_file_location("portable_ui_theme", theme)
+            if spec is None or spec.loader is None:
+                return
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            dark = mod.load_dark_mode(self._portable_root)
+            self._chrome_dark_btn.setText("浅色" if dark else "深色")
+        except Exception:
+            self._chrome_dark_btn.setText("深色")
+
+    def _toggle_dark_mode(self) -> None:
+        root = self._portable_root
+        if root is None:
+            return
+        theme = root / "portable_ui_theme.py"
+        if not theme.is_file():
+            return
+        try:
+            spec = importlib.util.spec_from_file_location("portable_ui_theme", theme)
+            if spec is None or spec.loader is None:
+                return
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.toggle_dark_mode(QApplication.instance(), root)
+            self._refresh_chrome_dark_label()
+        except Exception as e:
+            info(f"toggle_dark_mode: {e}")
+
+    def translation_history_action_triggered(self) -> None:
+        mod = _import_translation_history_module()
+        if mod is None:
+            QMessageBox.warning(
+                self,
+                "翻译历史",
+                "未找到便携版根目录下的 translation_history.py，无法读写历史。",
+            )
+            return
+        items = mod.load_items()
+        dlg = TranslationHistoryDialog(self, items)
+        dlg.exec_()
+

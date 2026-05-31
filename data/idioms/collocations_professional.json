@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "sources": [
+      "Oxford Russian Grammar and Verbs",
+      "EU DGT Style Guide (Slavic sections)",
+      "Wiktionary (CC BY-SA)",
+      "OpenRussian.org (CC BY-SA)",
+      "Sussex Blok Grammar"
+    ],
+    "description": "Business, legal, and formal register collocation repairs"
+  },
+  "ru": [
+    {"wrong": "в случай", "right": "в случае", "note": "formal conditional"},
+    {"wrong": "В случай", "right": "В случае", "note": "sentence start"},
+    {"wrong": "в порядке to", "right": "для того чтобы", "note": "in order to calque"},
+    {"wrong": "in order to", "right": "для того чтобы", "note": "English residue"},
+    {"wrong": "относительно к", "right": "относительно", "note": "Sussex — no к"},
+    {"wrong": "касательно к", "right": "касательно", "note": "formal prep"},
+    {"wrong": "рисовать вывод", "right": "делать вывод", "note": "draw a conclusion calque"},
+    {"wrong": "представляет из себя", "right": "представляет собой", "note": "formal copula"},
+    {"wrong": "является является", "right": "является", "note": "MT duplication"},
+    {"wrong": "может быть может быть", "right": "может быть", "note": "MT duplication"},
+    {"wrong": "that is to say", "right": "то есть", "note": "English residue"},
+    {"wrong": "as well as", "right": "а также", "note": "English calque"},
+    {"wrong": "based on", "right": "на основе", "note": "English calque"},
+    {"wrong": "due to", "right": "в связи с", "note": "formal cause"},
+    {"wrong": "with regard to", "right": "относительно", "note": "legal register"},
+    {"wrong": "in terms of", "right": "с точки зрения", "note": "business calque"},
+    {"wrong": "по поводу к", "right": "по поводу", "note": "duplicate prep"},
+    {"wrong": "в области of", "right": "в области", "note": "English residue"},
+    {"wrong": "осуществляет контроль", "right": "контролирует", "note": "deverbal noun calque optional"},
+    {"wrong": "оказывает содействие", "right": "содействует", "note": "formal concision"},
+    {"wrong": "принимает участие в в", "right": "принимает участие в", "note": "dup prep"},
+    {"wrong": "в рамках of", "right": "в рамках", "note": "English residue"}
+  ],
+  "uk": [
+    {"wrong": "у випадок", "right": "у випадку", "note": "formal conditional"},
+    {"wrong": "У випадок", "right": "У випадку", "note": "sentence start"},
+    {"wrong": "in order to", "right": "для того щоб", "note": "English residue"},
+    {"wrong": "based on", "right": "на основі", "note": "English calque"},
+    {"wrong": "due to", "right": "у зв'язку з", "note": "formal cause"},
+    {"wrong": "with regard to", "right": "стосовно", "note": "legal register"},
+    {"wrong": "as well as", "right": "а також", "note": "English calque"},
+    {"wrong": "that is to say", "right": "тобто", "note": "English residue"},
+    {"wrong": "представляє з себе", "right": "представляє собою", "note": "formal copula"},
+    {"wrong": "є є", "right": "є", "note": "MT duplication"},
+    {"wrong": "робить висновок", "right": "доходить висновку", "note": "draw conclusion"},
+    {"wrong": "приймає участь у у", "right": "бере участь у", "note": "dup prep"}
+  ]
+}

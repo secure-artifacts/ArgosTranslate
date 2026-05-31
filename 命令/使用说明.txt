@@ -1,0 +1,114 @@
+Argos Translate 便携版（本目录自包含）
+================================
+
+命令与说明都在本「命令」文件夹里。
+
+如何打开软件（任选一种）
+------------------------
+1）资源管理器双击（推荐）
+   • 在 ruanjian 文件夹双击：  打开Argos翻译.bat
+   • 或在 ArgosTranslate 根目录双击：  run_gui.bat（路径全为英文，在 CMD 默认 GBK 下也不会乱码）
+   • 或在 ArgosTranslate\命令 里双击：  启动Argos翻译.bat（内部会 call 根目录的 run_gui.bat）
+
+2）命令提示符 CMD（先 cd 到便携版根目录 ArgosTranslate；路径请改成你的实际位置）
+   cd /d D:\redownload\ruanjian\ArgosTranslate
+   run_gui.bat
+
+   或等价（手动设环境变量后启动 pythonw）：
+   set "XDG_DATA_HOME=%CD%\data\local"
+   set "XDG_CONFIG_HOME=%CD%\data\config"
+   set "XDG_CACHE_HOME=%CD%\data\cache"
+   set "PYTHONUTF8=1"
+   set "PYTHONIOENCODING=utf-8"
+   start "" "%CD%\venv\Scripts\pythonw.exe" -c "from argostranslategui import gui; gui.main()"
+
+   说明：run_gui.bat 与「打开Argos翻译.bat」内为英文提示，避免 UTF-8 批处理在 GBK 控制台解析错误；双击「启动Argos翻译.bat」同样会调用 run_gui.bat。
+
+3）PowerShell（先进入 ArgosTranslate 根目录；路径请按需修改）
+   Set-Location -LiteralPath 'D:\redownload\ruanjian\ArgosTranslate'
+   .\run_gui.bat
+
+   或手动环境变量后启动：
+   $env:XDG_DATA_HOME = "$PWD\data\local"
+   $env:XDG_CONFIG_HOME = "$PWD\data\config"
+   $env:XDG_CACHE_HOME = "$PWD\data\cache"
+   $env:PYTHONUTF8 = "1"
+   $env:PYTHONIOENCODING = "utf-8"
+   & "$PWD\venv\Scripts\pythonw.exe" -c "from argostranslategui import gui; gui.main()"
+
+   也可用 Start-Process（新进程、无控制台窗口）：
+   Start-Process -FilePath "$PWD\venv\Scripts\pythonw.exe" -WorkingDirectory $PWD -WindowStyle Hidden -ArgumentList @('-c','from argostranslategui import gui; gui.main()')
+
+说明：必须用本目录自带的 venv\Scripts\pythonw.exe，并设置 XDG_*，否则语言包与术语库读不到便携版内的 data。
+
+双击「启动Argos翻译.bat」或根目录「run_gui.bat」打开图形界面（离线翻译）。界面文案已改为中文（直接改在便携版 venv 内；若对该环境执行 pip install -U argostranslategui 可能被覆盖）。
+
+软件根目录（上一级 ArgosTranslate）结构：
+  run_gui.bat    一键启动 GUI（英文文件名，推荐 CMD 下使用）
+  venv\          Python 环境与程序
+  data\local\    语言模型与索引（可整体复制到 U 盘）
+  data\config\   本拷贝专用设置
+  data\cache\    缓存
+  data\glossary\ 中文术语库（见下）
+
+术语库（中文 → 指定外语）
+------------------------
+菜单「术语库…」打开术语库窗口（交互参考同目录上一级中的 offline_translator：顶部「源术语 / 目标术语」、词性、添加术语；批量粘贴导入；表格编辑）。写入 zh_glossary.json。
+
+**默认不**随主窗口自动打开术语库；需要时在菜单点「术语库…」，或在术语库窗口勾选「启动主程序时自动打开本术语库窗口」。
+
+偏好保存在 ArgosTranslate\data\config\glossary_gui_prefs.json。
+
+文件路径：ArgosTranslate\data\glossary\zh_glossary.json（JSON 持久化）。仅当左侧源语言为「中文」时术语替换生效。
+
+术语库窗口支持：**搜索表格**、**更多**菜单内「用选中行填到添加页」、**Ctrl+S** 保存、**导出 CSV**；**导入表格**（CSV 或 XLSX，第 1 列中文、第 2 列俄语，可选第 3 列词性；合并写入 JSON）。大批量导入已优化，避免卡死。保存时若同一中文多行，以**最后一行**为准并弹窗提示。译前占位符 GLOSSA 使用四位编号，长文多术语时更稳。
+
+模块化脚本（与 ArgosTranslate 根目录同级）：
+  glossary_manager.py   术语表类、CSV/XLSX、反查索引
+  terminology_bridge.py 翻译前占位符 GLOSSAxx、译后还原（避免整句混语种直替）
+  translation_quality.py 中文送入模型前轻量规范化；俄/乌译文极保守标点间距修正（非语法纠错器）
+  wiktionary_parser.py    ru.wiktionary.org API + BeautifulSoup；失败时用 pymorphy2；缓存 data\cache\wiktionary_inflections.json
+  word_info_dialog.py     译文区点击西里尔词 → 弹窗（术语中文、pymorphy2 标签、词形表）
+
+译文框内**单击俄语单词**可查看词形与术语反查（需联网查维基时才有完整表格）。
+
+俄语可在 JSON 中写 lemma + grammemes（依赖 pymorphy2），例如 grammemes: ["gent", "sing"]。
+
+环境变量 ARGOS_ZH_GLOSSARY 可指向自定义 JSON 路径。
+
+「Argos命令行环境.bat」会打开一个已配置好 PATH 的 CMD，可使用：
+  argos-translate --from en --to zh "Hello"
+  argospm update
+  argospm install translate-en_fr
+
+上一级目录 ruanjian 里的「打开Argos翻译.bat」会调用 ArgosTranslate\run_gui.bat（等价于在 ArgosTranslate 根目录执行 run_gui.bat）。
+
+说明：语言模型在 ArgosTranslate\data\local\argos-translate\packages 中。
+若需在新电脑使用，请复制整个 ArgosTranslate 文件夹。
+
+俄↔乌「换脑」训练与数据清洗路线图（与方案报告对应）见同目录：
+  俄乌离线模型强化路线图.txt
+（训练脚本在上一级 ruanjian\offline_translator\offline_training_template。）
+
+翻译「不全」或译文偏短（与软件设置有关）
+----------------------------------------
+本便携版已将 CTranslate2 的默认「每句最多译出约 256 个目标词」放宽，并默认不截断超长中文输入（旧版等价约 1024 词即截断）。
+若仍想更「抠字面」，可编辑：ArgosTranslate\data\config\argos-translate\settings.json（无则新建该目录与文件），例如：
+  "ARGOS_BEAM_SIZE": "10"
+  "ARGOS_MAX_INPUT_TOKENS": "0"
+  "ARGOS_MAX_DECODING_TOKENS": "6144"
+ARGOS_MAX_INPUT_TOKENS 为 0 表示不按 token 截断源句；ARGOS_MAX_DECODING_TOKENS 越大，单句允许输出的外文越长（也更耗内存与时间）。
+神经离线模型本身仍会概括大意，与在线大模型不同，属正常现象。
+
+合同 / 大量文字尽量译准（重要说明）
+----------------------------------------
+1）离线 Argos 语言包多为「通用」小模型，**不能替代**持证译员或律所审校；正式合同请以人工定稿为准。
+2）**固定术语、甲乙方名、金额与定义**请用菜单「术语库…」维护（中文源时生效），比单纯调 beam 更能拉高「准确度」。
+3）已在便携配置中提高默认搜索强度（见 data\config\argos-translate\settings.json），当前默认更偏向俄/乌长句译全（beam 14、ARGOS_PRECISE_TRANSLATION=1、max 解码 8192、略高 length/coverage）；可调项包括：
+   ARGOS_BEAM_SIZE（如 10～15，越大越慢）、ARGOS_BEAM_PATIENCE（如 1.1～1.25）、
+   ARGOS_LENGTH_PENALTY（如 0.38～0.45）、ARGOS_BATCH_SIZE（纯 CPU 内存紧张时可 12～16）。
+   ARGOS_COVERAGE_PENALTY（如 0.08～0.15）、ARGOS_REPETITION_PENALTY（如 1.02～1.08）。
+   ARGOS_INTRA_THREADS：0 表示由 CTranslate2 自选线程数；也可改为与本机物理核接近的整数以固定占用。
+4）run_gui.bat 内 `set ARGOS_PRECISE_TRANSLATION=1` 与 settings.json 中同名项二选一即可；已在 settings.json 默认开启精译下限，改后需重启程序。
+5）原文尽量按条款分段（换行），减少模型跨句漏译；长段翻译后请分段对照审阅。
+6）中文源在送入模型前会做轻量规范化（translation_quality.py：兼容字符与空白），俄/乌译文会做 NBSP/控制符清理、标点前空格修正、话语标记逗号、俄语「в течение + 时长词」误写修补、少量重复主语修补（俄：Он+У него нет；乌：Він+У нього немає）。若左栏为中文且右栏为俄/乌，对单行「什么是…？」误成 «Какова…?»（或乌语 «Яка…?»）等性质问句时，会保守改为 «Что такое…?» / «Що таке…?»（依赖左右栏当前文本对齐）。均不能替代语法审校。
