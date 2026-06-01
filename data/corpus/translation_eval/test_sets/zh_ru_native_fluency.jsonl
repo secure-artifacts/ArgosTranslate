@@ -1,0 +1,5 @@
+{"id": "flu_zh_ru_01", "source": "欧盟决定实施制裁。", "reference": "ЕС решил ввести санкции.", "source_lang": "zh", "target_lang": "ru", "tags": ["fluency", "collocation", "politics"]}
+{"id": "flu_zh_ru_02", "source": "双方进行了讨论。", "reference": "Стороны обсудили.", "source_lang": "zh", "target_lang": "ru", "tags": ["fluency", "diplomacy"]}
+{"id": "flu_zh_ru_03", "source": "中国外交部发表声明。", "reference": "МИД Китая выступил с заявлением.", "source_lang": "zh", "target_lang": "ru", "tags": ["fluency", "diplomacy"]}
+{"id": "flu_zh_ru_04", "source": "局势进一步升级。", "reference": "Ситуация обострилась.", "source_lang": "zh", "target_lang": "ru", "tags": ["fluency", "news"]}
+{"id": "flu_zh_ru_05", "source": "发言人表示，谈判将继续进行。", "reference": "Представитель заявил, что переговоры будут продолжены.", "source_lang": "zh", "target_lang": "ru", "tags": ["fluency", "news", "domain_verb"]}

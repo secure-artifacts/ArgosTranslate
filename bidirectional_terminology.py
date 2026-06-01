@@ -2,6 +2,7 @@
 双向术语：ru/uk↔zh 统一索引、中文专名反查、zh→俄/乌输出校正。
 
 优先级：用户术语库 > locked 内置 > entities > military > political > 语言规则
+同一中文对应多个俄/乌词时，按 slavic_lemma_rank 选当地人更常用的形。
 """
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import re
 from functools import lru_cache
 from typing import Any
 
+from slavic_lemma_rank import pick_preferred_slavic_lemma
 from terminology_registry import (
     _load_entities_and_terms,
     normalize_source_lang,
@@ -35,15 +37,37 @@ def _is_locked(item: dict[str, Any]) -> bool:
     return bool(item.get("locked")) or item.get("priority") == "locked"
 
 
+def _add_zh_candidate(
+    bucket: dict[str, list[tuple[str, dict[str, Any] | None, int]]],
+    zh: str,
+    lemma: str,
+    *,
+    meta: dict[str, Any] | None = None,
+    list_index: int,
+) -> None:
+    z = (zh or "").strip()
+    lem = (lemma or "").strip()
+    if not z or not lem:
+        return
+    for prev, _, _ in bucket.get(z, []):
+        if prev.lower() == lem.lower():
+            return
+    bucket.setdefault(z, []).append((lem, meta, list_index))
+
+
 @lru_cache(maxsize=2)
-def _build_zh_to_slavic_index(target_lang: str) -> dict[str, str]:
-    """中文词/短语 → 目标语 lemma（仅 target_lang 轨）。"""
+def _build_zh_to_slavic_candidates(
+    target_lang: str,
+) -> dict[str, list[tuple[str, dict[str, Any] | None, int]]]:
+    """中文 → 候选俄/乌词（含 metadata 与源表顺序）。"""
     lang = normalize_target_lang(target_lang)
+    bucket: dict[str, list[tuple[str, dict[str, Any] | None, int]]] = {}
     if lang not in ("ru", "uk"):
-        return {}
-    index: dict[str, str] = {}
+        return bucket
+
     data = _load_entities_and_terms()
     block = data.get(lang) or {}
+    idx = 0
     for category in ("entities", "places", "military", "political"):
         for item in block.get(category) or []:
             if not isinstance(item, dict):
@@ -51,23 +75,41 @@ def _build_zh_to_slavic_index(target_lang: str) -> dict[str, str]:
             zh = str(item.get("zh") or "").strip()
             lem = str(item.get("lemma") or "").strip()
             if zh and lem:
-                index[zh] = lem
+                _add_zh_candidate(bucket, zh, lem, meta=item, list_index=idx)
+                idx += 1
+
     zh_to = data.get("zh_to") or {}
     if isinstance(zh_to, dict):
         for zh, cell in zh_to.items():
             if not isinstance(cell, dict):
                 continue
+            meta = cell if _is_locked(cell) else {"usage_rank": 5}
             val = cell.get(lang)
             if isinstance(val, str) and val.strip():
-                index[str(zh).strip()] = val.strip()
+                _add_zh_candidate(
+                    bucket, str(zh).strip(), val.strip(), meta=meta, list_index=idx
+                )
+                idx += 1
             elif isinstance(val, dict):
                 lem = str(val.get("lemma") or "").strip()
                 if lem:
-                    index[str(zh).strip()] = lem
+                    _add_zh_candidate(
+                        bucket,
+                        str(zh).strip(),
+                        lem,
+                        meta={**cell, **val},
+                        list_index=idx,
+                    )
+                    idx += 1
+
     for zh, entry in _zh_name_entries().items():
         lem = str(entry.get(lang) or "").strip()
         if lem:
-            index[zh] = lem
+            _add_zh_candidate(
+                bucket, zh, lem, meta={"usage_rank": 8}, list_index=idx
+            )
+            idx += 1
+
     try:
         import terminology_bridge as tb
 
@@ -78,16 +120,49 @@ def _build_zh_to_slavic_index(target_lang: str) -> dict[str, str]:
             zh = str(entry.get("zh") or entry.get("source") or "").strip()
             if not zh:
                 continue
+            meta = {"usage_rank": 20}
             cell = entry.get(lang)
             if isinstance(cell, str) and cell.strip():
-                index[zh] = cell.strip()
+                _add_zh_candidate(bucket, zh, cell.strip(), meta=meta, list_index=idx)
+                idx += 1
             elif isinstance(cell, dict):
                 lem = str(cell.get("lemma") or "").strip()
                 if lem:
-                    index[zh] = lem
+                    _add_zh_candidate(bucket, zh, lem, meta=meta, list_index=idx)
+                    idx += 1
     except Exception:
         pass
-    return index
+    return bucket
+
+
+@lru_cache(maxsize=2)
+def _build_zh_to_slavic_index(target_lang: str) -> dict[str, str]:
+    """中文词/短语 → 目标语优选 lemma（仅 target_lang 轨）。"""
+    lang = normalize_target_lang(target_lang)
+    out: dict[str, str] = {}
+    for zh, rows in _build_zh_to_slavic_candidates(lang).items():
+        cands = [r[0] for r in rows]
+        metas = [r[1] for r in rows]
+        pick = pick_preferred_slavic_lemma(cands, lang, zh=zh, metas=metas)
+        if pick:
+            out[zh] = pick
+    return out
+
+
+def zh_to_slavic_alternatives(zh: str, target_lang: str) -> list[str]:
+    """某中文义项的全部俄/乌候选（已去重）。"""
+    z = (zh or "").strip()
+    if not z:
+        return []
+    rows = _build_zh_to_slavic_candidates(target_lang).get(z, [])
+    out: list[str] = []
+    seen: set[str] = set()
+    for lem, _, _ in rows:
+        key = lem.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(lem)
+    return out
 
 
 @lru_cache(maxsize=2)
@@ -115,15 +190,26 @@ def resolve_zh_pair(zh: str) -> dict[str, str]:
 
 def _wrong_forms_for_zh(zh: str, target_lang: str) -> list[str]:
     lang = normalize_target_lang(target_lang)
+    correct = resolve_zh_to_slavic(zh, lang) or ""
+    wrong: list[str] = []
+    for alt in zh_to_slavic_alternatives(zh, lang):
+        if alt and alt != correct and alt.lower() != correct.lower():
+            wrong.append(alt)
     entry = _zh_name_entries().get(zh) or {}
     key = "wrong_ru" if lang == "ru" else "wrong_uk"
-    wrong = [str(x).strip() for x in (entry.get(key) or []) if str(x).strip()]
+    wrong.extend(str(x).strip() for x in (entry.get(key) or []) if str(x).strip())
     other = "uk" if lang == "ru" else "ru"
     other_lem = resolve_zh_to_slavic(zh, other)
-    correct = resolve_zh_to_slavic(zh, lang)
     if other_lem and correct and other_lem != correct:
         wrong.append(other_lem)
-    return wrong
+    seen: set[str] = set()
+    out: list[str] = []
+    for w in wrong:
+        k = w.lower()
+        if k not in seen and k != correct.lower():
+            seen.add(k)
+            out.append(w)
+    return out
 
 
 def apply_zh_to_slavic_terminology(
@@ -133,7 +219,7 @@ def apply_zh_to_slavic_terminology(
     source_text: str | None = None,
 ) -> str:
     """
-    源文含某中文专名时，将译文中的错写/另一轨形式替换为目标语标准形。
+    源文含某中文专名时，将译文中的错写/另一轨/低频同义词替换为优选形。
     """
     if not (text or "").strip():
         return text
@@ -155,8 +241,6 @@ def apply_zh_to_slavic_terminology(
         for wrong in _wrong_forms_for_zh(zh, lang):
             if wrong and wrong != correct:
                 out = re.sub(re.escape(wrong), correct, out, flags=re.IGNORECASE)
-        if correct not in out:
-            pass
     return out
 
 

@@ -31,6 +31,24 @@ def clear_terminology_cache() -> None:
                 fn.cache_clear()
     except Exception:
         pass
+    try:
+        import bidirectional_terminology as bt
+
+        for fn in (
+            bt._build_zh_to_slavic_index,
+            bt._build_zh_to_slavic_candidates,
+            bt._zh_name_entries,
+        ):
+            if hasattr(fn, "cache_clear"):
+                fn.cache_clear()
+    except Exception:
+        pass
+    try:
+        from slavic_lemma_rank import clear_slavic_lemma_rank_cache
+
+        clear_slavic_lemma_rank_cache()
+    except Exception:
+        pass
 
 
 def load_extracted_glossaries() -> dict[str, list[dict[str, str]]]:
@@ -224,9 +242,21 @@ def merge_into_entities_file(
             )
             existing[key] = {"zh": zh, "category": cat, "locked": False}
             zh_to = data.setdefault("zh_to", {})
-            if isinstance(zh_to, dict) and zh not in zh_to:
-                cell = zh_to.setdefault(zh, {})
-                if isinstance(cell, dict):
+            if isinstance(zh_to, dict):
+                cell = zh_to.setdefault(zh, {}) if isinstance(zh_to.get(zh), dict) else {}
+                if not isinstance(zh_to.get(zh), dict):
+                    zh_to[zh] = cell
+                prev = cell.get(lang)
+                if isinstance(prev, str) and prev.strip() and prev.strip().lower() != lem.lower():
+                    try:
+                        from slavic_lemma_rank import pick_preferred_slavic_lemma
+
+                        cell[lang] = pick_preferred_slavic_lemma(
+                            [prev.strip(), lem], lang, zh=zh
+                        )
+                    except ImportError:
+                        cell[lang] = lem
+                elif lang not in cell or not str(cell.get(lang) or "").strip():
                     cell[lang] = lem
             added += 1
 

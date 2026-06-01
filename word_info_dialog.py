@@ -1054,7 +1054,7 @@ def build_minimal_lookup_html(
     context_html: str = "",
     in_sentence_grammar_html: str = "",
 ) -> str:
-    """仅展示：句中语法 + 所在句 + 原形 + 词性语法 + 词义 + 变位表（若有）。"""
+    """仅展示：句中语法 + 原形 + 词性语法 + 词义 + 变位表（若有）。"""
     _ = sentence_zh  # 保留参数供生词本等调用方写入例句，侧栏不再展示
     uk_lem = (lemma_uk or "").strip()
     uk_block = ""
@@ -1859,68 +1859,44 @@ def build_russian_sentence_context_html(
     source_zh_hint: str = "",
     ru_stress_map: dict[str, str] | None = None,
 ) -> str:
+    """句中上下文辅助信息（不展示「所在句子」及其高亮标注）。"""
+    _ = (source_zh_hint, ru_stress_map)
     if not sentence or not sentence.strip():
         return ""
-    rs = max(0, min(rel_start, len(sentence)))
-    re_ = max(rs, min(rel_end, len(sentence)))
-    sent_work = sentence
-    rs2, re2 = rs, re_
-    if ru_stress_map:
-        sent_work, spans = wp.ru_stress_sentence_and_spans(sentence, ru_stress_map)
-        if spans:
-            k = wp.ru_cyrillic_word_index_at(sentence, rs)
-            if 0 <= k < len(spans):
-                rs2, re2 = spans[k][0], spans[k][1]
-    if _lookup_compact():
-        inner = highlight_word_in_sentence_html(
-            sent_work, rs2, re2, wrap_lk_box=False
+    role_p = ""
+    try:
+        role = russian_in_sentence_role_zh(
+            clicked, sentence, rel_start, rel_end
         )
-        zh_line = ""
-        hint = (source_zh_hint or "").strip()
-        if hint:
-            if len(hint) > 220:
-                hint = hint[:220].rstrip() + "…"
-            zh_line = (
-                "<p class='lk-src-zh'>"
-                f"{html.escape(idisp.to_zh_cn(hint))}</p>"
+        if role:
+            if len(role) > 420:
+                role = role[:419].rstrip() + "…"
+            role_p = (
+                "<p class='lk-ctx-anal'>"
+                f"{html.escape(idisp.to_zh_cn(role))}</p>"
             )
-        role_p = ""
-        try:
-            role = russian_in_sentence_role_zh(
-                clicked, sentence, rel_start, rel_end
-            )
-            if role:
-                if len(role) > 420:
-                    role = role[:419].rstrip() + "…"
-                role_p = (
-                    "<p class='lk-ctx-anal'>"
-                    f"{html.escape(idisp.to_zh_cn(role))}</p>"
-                )
-        except Exception:
-            pass
-        return f"<div class='lk-card'>{inner}{zh_line}{role_p}</div>"
-
-    block = highlight_word_in_sentence_html(sent_work, rs2, re2)
-    role = russian_in_sentence_role_zh(clicked, sentence, rel_start, rel_end)
-    return block + f"<p style='margin-top:6px'>{html.escape(idisp.to_zh_cn(role))}</p>"
+    except Exception:
+        pass
+    if not role_p.strip():
+        return ""
+    if _lookup_compact():
+        return f"<div class='lk-card'>{role_p}</div>"
+    return f"<div style='margin-top:6px'>{role_p}</div>"
 
 
 def build_ukrainian_sentence_context_html(
     sentence: str | None, rel_start: int, rel_end: int, clicked: str
 ) -> str:
-    _ = clicked
+    _ = (sentence, rel_start, rel_end, clicked)
     if not sentence or not sentence.strip():
         return ""
-    rs = max(0, min(rel_start, len(sentence)))
-    re_ = max(rs, min(rel_end, len(sentence)))
-    block = highlight_word_in_sentence_html(sentence, rs, re_)
     note = (
         "<p style='color:#555;font-size:14px;line-height:1.55'>乌克兰语：本版未内置形态库，"
         "义项无法按格/体自动筛选；请结合句意从下列汉语维基释义中判断。</p>"
     )
     if _lookup_compact():
         note = "<p style='color:#666;font-size:13px'>乌：义项未按形态筛选，请结合句意。</p>"
-    return block + idisp.to_zh_cn(note)
+    return note
 
 
 def _tables_to_html(
@@ -2071,7 +2047,7 @@ def build_russian_word_info_html(
                 + "</div>"
             )
 
-        # 与示意稿一致：单词头 → 语法标签 → 词形分析 → 所在句子 → 变格表 → 维基摘录等
+        # 与示意稿一致：单词头 → 语法标签 → 词形分析 → 变格表 → 维基摘录等
         if context_html:
             parts.append(context_html)
         conj_sec = build_ru_conjugation_section_html(

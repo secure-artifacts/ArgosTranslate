@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "lang": "uk",
+    "domain": "diplomacy",
+    "description": "新闻/外交通用搭配（乌语轨）"
+  },
+  "entries": [
+    {
+      "zh": "发表声明",
+      "preferred": "виступити із заявою",
+      "avoid": ["зробити заяву", "заявити заяву"],
+      "domain": "diplomacy",
+      "rank": 10
+    },
+    {
+      "zh": "双方进行了讨论",
+      "preferred": "сторони обговорили",
+      "avoid": ["сторони провели обговорення"],
+      "domain": "diplomacy",
+      "rank": 9
+    },
+    {
+      "zh": "展开谈判",
+      "preferred": "розпочати переговори",
+      "avoid": ["розгорнути переговори"],
+      "domain": "diplomacy",
+      "rank": 9
+    }
+  ]
+}

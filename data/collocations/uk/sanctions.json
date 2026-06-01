@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "lang": "uk",
+    "domain": "politics",
+    "zh_head": "制裁",
+    "description": "制裁相关动词搭配（乌语轨）"
+  },
+  "entries": [
+    {
+      "zh": "实施制裁",
+      "preferred": "запровадити санкції",
+      "avoid": ["зробити санкції", "провести санкції"],
+      "domain": "politics",
+      "rank": 10
+    },
+    {
+      "zh": "取消制裁",
+      "preferred": "скасувати санкції",
+      "avoid": ["прибрати санкції"],
+      "domain": "politics",
+      "rank": 9
+    },
+    {
+      "zh": "扩大制裁",
+      "preferred": "розширити санкції",
+      "avoid": ["збільшити санкції"],
+      "domain": "politics",
+      "rank": 9
+    }
+  ]
+}

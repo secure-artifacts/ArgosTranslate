@@ -38,6 +38,11 @@ class EvalCaseResult:
     tm_purity: float
     semantic_score: float
     length_ratio: float
+    news_style_score: float
+    diplomatic_style_score: float
+    native_fluency_score: float
+    collocation_hit_rate: float
+    anti_mt_violation_rate: float
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -198,6 +203,87 @@ def _hallucination_rate(source: str, hypothesis: str, reference: str) -> float:
     return round(spurious / total, 4)
 
 
+def _fluency_scores(
+    source: str, hypothesis: str, target_lang: str
+) -> tuple[float, float, float, float, float]:
+    """news, diplomatic, native_fluency, collocation_hit, anti_mt_violation。"""
+    tl = (target_lang or "").lower()
+    if tl not in ("ru", "uk"):
+        return 0.5, 0.5, 0.5, 0.5, 0.0
+    hyp = hypothesis or ""
+    src = source or ""
+    news = dip = native = 0.5
+    coll_hit = 0.5
+    anti_mt = 0.0
+    try:
+        from native_fluency_config import detect_domain
+        from news_style_rerank import (
+            diplomatic_style_score,
+            native_fluency_score,
+            news_style_score,
+        )
+
+        dom = detect_domain(src)
+        news = news_style_score(hyp, domain=dom)
+        dip = diplomatic_style_score(hyp)
+        native = native_fluency_score(hyp, source_text=src, domain=dom)
+    except ImportError:
+        pass
+
+    try:
+        from slavic_collocation_rank import _load_collocations
+        from native_fluency_config import detect_domain
+
+        dom = detect_domain(src)
+        total = hits = 0
+        for entry in _load_collocations(tl):
+            zh = str(entry.get("zh") or "").strip()
+            if not zh or zh not in src:
+                continue
+            ed = str(entry.get("domain") or "")
+            if ed and ed != dom and dom != "news":
+                continue
+            pref = str(entry.get("preferred") or "").strip()
+            if not pref:
+                continue
+            total += 1
+            if pref.lower() in hyp.lower():
+                hits += 1
+        if total:
+            coll_hit = hits / total
+    except ImportError:
+        pass
+
+    try:
+        from native_fluency_config import _anti_mt_config
+
+        rows = (_anti_mt_config().get(tl) or []) if tl in ("ru", "uk") else []
+        violations = 0
+        checked = 0
+        low = hyp.lower()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            avoid = str(row.get("avoid") or "").strip().lower()
+            if len(avoid) < 4:
+                continue
+            checked += 1
+            if avoid in low:
+                violations += 1
+        if checked:
+            anti_mt = violations / checked
+    except ImportError:
+        pass
+
+    return (
+        round(news, 4),
+        round(dip, 4),
+        round(native, 4),
+        round(coll_hit, 4),
+        round(anti_mt, 4),
+    )
+
+
 def evaluate_case(
     case: dict[str, Any],
     hypothesis: str,
@@ -244,6 +330,8 @@ def evaluate_case(
         except Exception:
             pass
 
+    news_s, dip_s, flu_s, coll_s, anti_s = _fluency_scores(src, hyp, tl)
+
     return EvalCaseResult(
         case_id=cid,
         source_lang=sl,
@@ -262,6 +350,11 @@ def evaluate_case(
         tm_purity=tm_pur,
         semantic_score=round(float(semantic), 4),
         length_ratio=round(lr, 4),
+        news_style_score=news_s,
+        diplomatic_style_score=dip_s,
+        native_fluency_score=flu_s,
+        collocation_hit_rate=coll_s,
+        anti_mt_violation_rate=anti_s,
     )
 
 
@@ -341,6 +434,11 @@ def run_eval_set(name: str, translate_fn=None) -> dict[str, Any]:
         ),
         "avg_tm_similarity": avg("tm_similarity"),
         "avg_semantic_score": avg("semantic_score"),
+        "avg_news_style_score": avg("news_style_score"),
+        "avg_diplomatic_style_score": avg("diplomatic_style_score"),
+        "avg_native_fluency_score": avg("native_fluency_score"),
+        "avg_collocation_hit_rate": avg("collocation_hit_rate"),
+        "avg_anti_mt_violation_rate": avg("anti_mt_violation_rate"),
         "results": results,
     }
     out_path = results_dir() / f"eval_{name}.json"

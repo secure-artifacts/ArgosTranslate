@@ -115,6 +115,14 @@ def postprocess_zh_to_slavic(
     except ImportError:
         pass
 
+    # 母语润色：collocation → style rerank → anti-MT
+    try:
+        from native_fluency_pipeline import post_edit_native
+
+        t = post_edit_native(t, lang, source_text=src)
+    except ImportError:
+        pass
+
     t = prevent_cross_track_mixing(t, lang, source_text=src)
     return t.strip() if t else t
 
@@ -127,6 +135,8 @@ def ollama_zh_to_slavic_system_appendix(target_lang: str) -> str:
     ex = ru_ex if lang == "ru" else uk_ex
     return (
         f"Chinese→{track}: Write native news/diplomatic {track}, NOT Chinese word order. "
+        "Prefer natural collocations (实施制裁→ввести санкции), not calques. "
+        "Use заявил/сообщил in news, not сказал. "
         "Correct case, gender, number, and verb aspect/tense. "
         "Proper names must match the target track only "
         "(基辅→Киев/Київ; 亚历山大→Александр/Олександр). "
