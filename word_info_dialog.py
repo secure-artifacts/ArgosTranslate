@@ -3297,3 +3297,12 @@ class ClickableTranslationTextEdit(QTextEdit):
         if bounds is None:
             return
         self._run_word_lookup(bounds[0], bounds[1])
+
+    def keyPressEvent(self, event):
+        if self._lookup_role == "source":
+            from translation_source_edit import is_paste_plain_shortcut, paste_plain_into_text_edit
+
+            if is_paste_plain_shortcut(event):
+                paste_plain_into_text_edit(self)
+                return
+        super().keyPressEvent(event)

@@ -32,6 +32,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from translation_source_edit import SourceTranslationTextEdit
+
 if TYPE_CHECKING:
     from argostranslategui.gui import GUIWindow
 
@@ -217,13 +219,13 @@ class TranslationTabPage(QWidget):
         self._populate_lang_row(lang_row)
         layout.addWidget(lang_bar)
 
-        self.left_textEdit = QTextEdit()
+        self.left_textEdit = SourceTranslationTextEdit()
         from argostranslategui.gui import _fast_startup_enabled
 
         if root is not None and _fast_startup_enabled():
             _src_ph = "在此输入要翻译的原文"
         else:
-            _src_ph = "在此输入要翻译的原文（支持大段文字；极长单行会自动按语义切块后翻译）"
+            _src_ph = "在此输入要翻译的原文（Ctrl+Shift+V 仅粘贴纯文本）"
             if root is not None:
                 try:
                     import ollama_translate as ot

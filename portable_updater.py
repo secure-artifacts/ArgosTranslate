@@ -51,6 +51,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "ollama_setup.py",
     "ollama_setup_dialog.py",
     "translation_tab_page.py",
+    "translation_source_edit.py",
     "translation_engine_ui.py",
     "portable_paths.py",
     "portable_installer.py",
