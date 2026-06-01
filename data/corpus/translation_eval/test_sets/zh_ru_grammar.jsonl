@@ -1,0 +1,3 @@
+{"id": "gram_zh_ru_01", "source": "中国常驻联合国代表在发言中强调多边主义的重要性。", "reference": "Постоянный представитель Китая при ООН в своём выступлении подчеркнул важность многосторонности.", "source_lang": "zh", "target_lang": "ru", "tags": ["grammar", "zh_ru"]}
+{"id": "gram_zh_ru_02", "source": "双方同意在平等基础上继续对话。", "reference": "Стороны договорились продолжить диалог на основе равенства.", "source_lang": "zh", "target_lang": "ru", "tags": ["grammar", "zh_ru"]}
+{"id": "gram_zh_ru_03", "source": "世界卫生组织呼吁加强跨境卫生合作。", "reference": "Всемирная организация здравоохранения призвала усилить трансграничное сотрудничество в области здравоохранения.", "source_lang": "zh", "target_lang": "ru", "tags": ["grammar", "zh_ru", "entities"]}

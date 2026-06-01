@@ -1,0 +1,23 @@
+{
+  "anchors": [
+    {"ru": "ООН", "zh": "联合国", "entity_type": "ORG"},
+    {"ru": "Организация Объединённых Наций", "zh": "联合国", "entity_type": "ORG"},
+    {"ru": "Организации Объединённых Наций", "zh": "联合国", "entity_type": "ORG"},
+    {"ru": "ВОЗ", "zh": "世卫组织", "entity_type": "ORG"},
+    {"ru": "Всемирной организации здравоохранения", "zh": "世界卫生组织", "entity_type": "ORG"},
+    {"ru": "Гутерриш", "zh": "古特雷斯", "entity_type": "PERSON"},
+    {"ru": "Антониу Гутерриш", "zh": "古特雷斯", "entity_type": "PERSON"},
+    {"ru": "Совет Безопасности", "zh": "安理会", "entity_type": "ORG"},
+    {"ru": "Совета Безопасности", "zh": "安理会", "entity_type": "ORG"},
+    {"ru": "Демократической Республики Конго", "zh": "刚果（金）", "entity_type": "GPE"},
+    {"ru": "ДР Конго", "zh": "刚果（金）", "entity_type": "GPE"},
+    {"ru": "Эбола", "zh": "埃博拉", "entity_type": "EVENT"},
+    {"ru": "Украин", "zh": "乌克兰", "entity_type": "GPE"},
+    {"ru": "Газ", "zh": "加沙", "entity_type": "GPE"},
+    {"ru": "Израил", "zh": "以色列", "entity_type": "GPE"},
+    {"ru": "Палестин", "zh": "巴勒斯坦", "entity_type": "GPE"},
+    {"ru": "ФАО", "zh": "粮农组织", "entity_type": "ORG"},
+    {"ru": "ЮНИСЕФ", "zh": "儿基会", "entity_type": "ORG"},
+    {"ru": "НАТО", "zh": "北约", "entity_type": "ORG"}
+  ]
+}

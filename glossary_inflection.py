@@ -2504,15 +2504,18 @@ def fix_sentence_slavic_morphology(sentence: str, lang: str) -> str:
     return _rebuild_line(line, spans, surfaces)
 
 
-def fix_text_slavic_morphology(text: str, lang: str) -> str:
-    """逐行修补俄/乌译文变格（保留空行结构）；每句两遍以收敛一致关系。"""
+def fix_text_slavic_morphology(text: str, lang: str, *, passes: int = 2) -> str:
+    """逐行修补俄/乌译文变格（保留空行结构）；默认两遍，passes=1 用于长文加速。"""
     if not (text or "").strip():
         return text
+    n = max(1, min(2, int(passes)))
     lines = (text or "").split("\n")
     fixed: list[str] = []
     for ln in lines:
-        once = fix_sentence_slavic_morphology(ln, lang)
-        fixed.append(fix_sentence_slavic_morphology(once, lang))
+        cur = ln
+        for _ in range(n):
+            cur = fix_sentence_slavic_morphology(cur, lang)
+        fixed.append(cur)
     return "\n".join(fixed)
 
 

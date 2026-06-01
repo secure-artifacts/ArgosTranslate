@@ -1,0 +1,4 @@
+{"id": "ne_01", "source": "Генеральный секретарь ООН Антонио Гутерреш выступил на пресс-конференции.", "reference": "联合国秘书长安东尼奥·古特雷斯在新闻发布会上发言。", "source_lang": "ru", "target_lang": "zh", "tags": ["entities", "un"]}
+{"id": "ne_02", "source": "Всемирная организация здравоохранения опубликовала новый отчёт.", "reference": "世界卫生组织发布了新报告。", "source_lang": "ru", "target_lang": "zh", "tags": ["entities", "who"]}
+{"id": "ne_03", "source": "Президент України Володимир Зеленський провів телефонну розмову з лідерами країн НАТО.", "reference": "乌克兰总统弗拉基米尔·泽连斯基与北约国家领导人进行了电话交谈。", "source_lang": "uk", "target_lang": "zh", "tags": ["entities", "ukraine", "nato"]}
+{"id": "ne_04", "source": "Совет Безопасности ООН рассмотрел ситуацию на Ближнем Востоке.", "reference": "联合国安理会审议了中东局势。", "source_lang": "ru", "target_lang": "zh", "tags": ["entities", "un"]}

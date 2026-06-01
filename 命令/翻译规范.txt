@@ -1,0 +1,47 @@
+翻译规范（Argos 强化 · 摘要）
+================================
+
+完整原则已写入程序，详见：
+  · data/terminology/entities_and_terms.json  — 俄/乌分轨专名、军事、政治术语
+  · data/idioms/zh_names_slavic.json         — 中→俄/乌人名
+  · terminology_registry.py                  — 优先级与 lemma 查词
+  · slavic_to_zh_enhance.py                  — 俄/乌→中后处理
+  · zh_to_slavic_enhance.py                  — 中→俄/乌后处理（外交/新闻句式）
+  · bidirectional_terminology.py             — 双向专名 zh↔ru/uk
+  · data/idioms/zh_news_slavic.json          — 外交/新闻整句 calque
+  · translation_memory + corpus TM           — 四向记忆库 ru/uk↔zh
+
+【优先级】
+  1. 用户术语库（菜单「术语库」）
+  2. 翻译记忆库 TM（ARGOS_USE_TM=1）
+  3. 双向专名（entities + zh_to，locked 不可覆盖）
+  4. 军事/政治术语
+  5. 变格/语法与口语规则
+  6. Argos/Ollama 模型（最低）
+
+【俄 vs 乌】
+  必须按源语分轨，禁止混用译名。
+  例：乌 Олександр → 奥列克桑德尔；俄 Александр → 亚历山大。
+
+【俄/乌→中】
+  · 词形先归一 lemma 再查表（Путина→普京）
+  · 新闻体中文，拆长句，禁止生硬直译
+  · 环境变量 ARGOS_SLAVIC_TO_ZH_ENHANCE=0 可关闭
+
+【中→俄/乌】
+  · ARGOS_SLAVIC_ENHANCE=1、ARGOS_ZH_TO_SLAVIC_ENHANCE=1（默认）
+  · 中文专名反查：基辅→Киев/Київ；亚历山大→Александр/Олександр
+  · 外交句示例：中国政府发表声明 → Правительство Китая выступило с заявлением.
+  · 变格/性数/时态：translation_quality + glossary_inflection
+  · 宗教/口语/姊妹称谓等规则库
+
+【双向 TM】
+  ru→zh、uk→zh、zh→ru、zh→uk（语料管线自动写入双向句对）
+  命中日志：data/corpus/reports/tm_hits.log
+
+【语料来源（扩展方向）】
+  联合国、乌克兰官方站、OPUS、Europarl 等语料用于持续扩充
+  data/terminology/ 与术语库；本程序不自动爬网，需人工或脚本导入。
+
+【禁用】
+  大陆低质机翻政治套话、逐词译、俄乌译名混用、擅自增删事实。

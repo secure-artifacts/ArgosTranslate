@@ -1,0 +1,42 @@
+{
+  "meta": {
+    "source_lang": "uk",
+    "locked": true,
+    "entry_count": 3
+  },
+  "entries": [
+    {
+      "source": "Україна",
+      "target": "乌克兰",
+      "lemma": "Україна",
+      "zh": "乌克兰",
+      "entity_type": "GPE",
+      "confidence": 1.0,
+      "sources_count": 2,
+      "domains": ["ukraine_ua", "manual"],
+      "locked": true
+    },
+    {
+      "source": "НАТО",
+      "target": "北约",
+      "lemma": "НАТО",
+      "zh": "北约",
+      "entity_type": "ORG",
+      "confidence": 1.0,
+      "sources_count": 2,
+      "domains": ["ukraine_ua", "manual"],
+      "locked": true
+    },
+    {
+      "source": "Збройні Сили України",
+      "target": "乌克兰武装部队",
+      "lemma": "Збройні Сили України",
+      "zh": "乌克兰武装部队",
+      "entity_type": "ORG",
+      "confidence": 1.0,
+      "sources_count": 1,
+      "domains": ["ukraine_ua", "manual"],
+      "locked": true
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+检查更新（GitHub）
+==================
+
+顶栏「检查更新」或菜单「检查更新…」：
+
+1. 检查更新 — 连接 GitHub 查看最新 Release
+2. 若有新版本 — 点「下载并安装」（需联网）
+3. 完成后 — 完全退出软件再重新打开
+
+更新内容：程序脚本与界面（zip），不覆盖 data 里的术语库、语言包、语音模型。
+
+默认仓库：secure-artifacts/ArgosTranslate
+可在 settings.json 设置：ARGOS_GITHUB_REPO

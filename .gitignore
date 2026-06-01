@@ -47,10 +47,26 @@ data/config/speech_audio.json
 
 # Test / temp
 _test_out.txt
+_test_*.py
 _wiki_snip.txt
 *.log
+logs/
 downloads/
 data/logs/
+
+# Corpus pipeline runtime artifacts (keep test_sets + manifest templates in repo)
+data/corpus/raw/un/
+data/corpus/raw/opus/
+data/corpus/raw/ted/
+data/corpus/aligned/
+data/corpus/quarantine/
+data/corpus/candidate_pairs/
+data/corpus/reports/
+data/corpus/tm/
+data/corpus/gold_corpus/
+data/corpus/manual_review_queue/
+data/corpus/translation_eval/results/
+data/glossary/corpus/
 
 # Dev scratch under tools/
 tools/bkrs_*

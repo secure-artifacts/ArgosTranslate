@@ -732,7 +732,7 @@ def _fix_verb_prep_collocations(
             j += 1
 
 
-def fix_sentence_advanced_slavic_morphology(sentence: str, lang: str) -> str:
+def fix_sentence_advanced_slavic_morphology(sentence: str, lang: str, *, passes: int = 2) -> str:
     line = sentence or ""
     if not line.strip() or not advanced_slavic_morph_enabled():
         return line
@@ -758,6 +758,8 @@ def fix_sentence_advanced_slavic_morphology(sentence: str, lang: str) -> str:
     _fix_verb_prep_collocations(surfaces, lowers, morph, code)
 
     line = _rebuild(line, spans, surfaces)
+    if int(passes) < 2:
+        return line
     # 第二遍：前述变格后再跑动词一致与多词介词
     spans = _word_spans(line, code)
     surfaces = [w for _, _, w in spans]
@@ -768,10 +770,11 @@ def fix_sentence_advanced_slavic_morphology(sentence: str, lang: str) -> str:
     return _rebuild(line, spans, surfaces)
 
 
-def fix_text_advanced_slavic_morphology(text: str, lang: str) -> str:
+def fix_text_advanced_slavic_morphology(text: str, lang: str, *, passes: int = 2) -> str:
     if not (text or "").strip():
         return text
+    n = max(1, min(2, int(passes)))
     lines = (text or "").split("\n")
     return "\n".join(
-        fix_sentence_advanced_slavic_morphology(ln, lang) for ln in lines
+        fix_sentence_advanced_slavic_morphology(ln, lang, passes=n) for ln in lines
     )

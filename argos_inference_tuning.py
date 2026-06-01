@@ -1,9 +1,10 @@
 """
 按输入长度调整 Argos/CTranslate2 推理参数，并预热翻译引擎。
-短词/短句用较小 beam；长中文则提高解码上限与 length_penalty，避免俄语输出过短。
+短句：beam 4 + 按字数估算解码上限，避免截断；中/长句分档兼顾速度与译全。
 """
 from __future__ import annotations
 
+import os
 
 _SAVED: dict[str, object] | None = None
 
@@ -27,8 +28,33 @@ def is_short_text(text: str) -> bool:
     return len(t) < 120 and t.count("\n") < 2
 
 
+def text_tier(text: str) -> str:
+    """short | medium | long — 用于推理与后处理分级。"""
+    t = (text or "").strip()
+    if not t or is_short_text(t):
+        return "short"
+    cjk = _cjk_char_count(t)
+    if cjk >= 90 or len(t) >= 260 or t.count("\n") >= 4:
+        return "long"
+    return "medium"
+
+
+def _short_decoding_tokens(text: str) -> int:
+    """短句解码上限：按源语长度估算，避免俄/乌尾句被截断。"""
+    t = (text or "").strip()
+    cjk = _cjk_char_count(t)
+    plain = len(t)
+    est = 128 + cjk * 12 + plain * 2
+    return max(320, min(640, est))
+
+
 def debounce_ms_for_text(text: str) -> int:
-    return 160 if is_short_text(text) else 360
+    tier = text_tier(text)
+    if tier == "short":
+        return 100
+    if tier == "medium":
+        return 220
+    return 300
 
 
 def _scaled_max_decoding_tokens(text: str, saved: dict[str, object]) -> int:
@@ -38,14 +64,15 @@ def _scaled_max_decoding_tokens(text: str, saved: dict[str, object]) -> int:
         return max(256, base)
     cjk = _cjk_char_count(t)
     plain_len = len(t)
-    # 长中文需要更多目标语 token；按字数估算并封顶
-    est = 320 + max(cjk, plain_len // 2) * 3
+    est = 280 + max(cjk, plain_len // 2) * 2
     if "\n" in t:
-        est = max(est, 480 + max(len(p) for p in t.split("\n")) * 2)
-    return max(base, min(4096, est))
+        est = max(est, 420 + max(len(p) for p in t.split("\n")) * 2)
+    tier = text_tier(t)
+    cap = 2048 if tier == "short" else 2560 if tier == "medium" else 3840
+    return max(base, min(cap, est))
 
 
-def apply_for_input(text: str) -> None:
+def _ensure_saved() -> dict[str, object]:
     global _SAVED
     import argostranslate.settings as s
 
@@ -58,29 +85,88 @@ def apply_for_input(text: str) -> None:
             "length_penalty": s.length_penalty,
             "repetition_penalty": s.repetition_penalty,
         }
+    return _SAVED
 
-    if is_short_text(text):
-        s.beam_size = min(4, int(_SAVED["beam_size"]) if int(_SAVED["beam_size"]) > 0 else 4)
-        cjk = _cjk_char_count(text)
-        s.max_decoding_tokens = 384 if cjk >= 12 else 256
+
+def apply_for_input(text: str) -> None:
+    try:
+        import argos_cpu_tuning as act
+
+        act.apply_cpu_defaults()
+    except ImportError:
+        pass
+    import argostranslate.settings as s
+
+    saved = _ensure_saved()
+    tier = text_tier(text)
+
+    if tier == "short":
+        base_beam = int(saved["beam_size"]) if int(saved["beam_size"]) > 0 else 4
+        s.beam_size = min(4, max(3, base_beam))
+        s.max_decoding_tokens = _short_decoding_tokens(text)
         s.beam_patience = 1.0
-        s.coverage_penalty = 0.0
-        s.length_penalty = min(0.35, float(_SAVED["length_penalty"]))
-        s.repetition_penalty = 1.0
+        s.coverage_penalty = max(0.02, float(saved["coverage_penalty"]))
+        s.length_penalty = max(0.36, float(saved["length_penalty"]))
+        s.repetition_penalty = max(1.0, float(saved["repetition_penalty"]))
+        return
+
+    for key, val in saved.items():
+        setattr(s, key, val)
+    s.max_decoding_tokens = _scaled_max_decoding_tokens(text, saved)
+
+    if tier == "medium":
+        base_beam = int(saved["beam_size"]) if int(saved["beam_size"]) > 0 else 4
+        s.beam_size = min(4, max(4, base_beam))
+        s.length_penalty = max(float(saved["length_penalty"]), 0.37)
+        s.coverage_penalty = max(float(saved["coverage_penalty"]), 0.04)
+        s.beam_patience = 1.0
     else:
-        for key, val in _SAVED.items():
-            setattr(s, key, val)
-        s.max_decoding_tokens = _scaled_max_decoding_tokens(text, _SAVED)
-        cjk = _cjk_char_count(text)
-        if cjk >= 60 or len((text or "").strip()) >= 180:
-            s.length_penalty = max(
-                float(_SAVED["length_penalty"]),
-                0.40 if cjk >= 120 else 0.36,
-            )
-            s.coverage_penalty = max(
-                float(_SAVED["coverage_penalty"]),
-                0.06 if cjk >= 120 else 0.0,
-            )
+        # 长句：beam 5 + 略高 length/coverage，比 beam 6 更快且译文更完整
+        base_beam = int(saved["beam_size"]) if int(saved["beam_size"]) > 0 else 5
+        s.beam_size = min(5, max(5, base_beam))
+        s.length_penalty = max(float(saved["length_penalty"]), 0.40)
+        s.coverage_penalty = max(float(saved["coverage_penalty"]), 0.05)
+        s.beam_patience = min(1.08, max(1.0, float(saved["beam_patience"])))
+
+
+def apply_for_slavic_pair(text: str, from_code: str, to_code: str) -> None:
+    """
+    中→俄/乌：统一速度/准度分档（不再叠加大 beam）。
+  环境变量 ARGOS_SLAVIC_FAST=1 时长文也用 beam 5。
+    """
+    src = (from_code or "").strip().lower()
+    tgt = (to_code or "").strip().lower()
+    if src not in ("zh", "zt", "cn", "zho") or tgt not in ("ru", "uk"):
+        apply_for_input(text)
+        return
+
+    apply_for_input(text)
+
+    import argostranslate.settings as s
+
+    saved = _ensure_saved()
+    tier = text_tier(text)
+    if tier == "short":
+        base_beam = int(saved["beam_size"]) if int(saved["beam_size"]) > 0 else 5
+        s.beam_size = min(4, max(4, base_beam))
+        s.max_decoding_tokens = _short_decoding_tokens(text)
+        s.length_penalty = max(float(saved["length_penalty"]), 0.37)
+        s.coverage_penalty = max(float(saved["coverage_penalty"]), 0.03)
+
+    fast = os.environ.get("ARGOS_SLAVIC_FAST", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not fast:
+        return
+    if tier == "short":
+        s.beam_size = 3
+        return
+    base = int(saved["beam_size"]) if int(saved["beam_size"]) > 0 else 5
+    s.beam_size = min(5, base)
+    s.coverage_penalty = float(saved["coverage_penalty"])
 
 
 def warmup_translation(from_code: str, to_code: str) -> None:
@@ -103,7 +189,7 @@ def warmup_translation(from_code: str, to_code: str) -> None:
             trans = langs[fc].get_translation(langs[tc])
             if trans is None:
                 return
-            apply_for_input("тест")
+            apply_for_slavic_pair("测试短句。", fc, tc)
             trans.translate("тест")
         except Exception:
             pass

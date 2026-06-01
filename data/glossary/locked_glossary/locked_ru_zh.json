@@ -1,0 +1,54 @@
+{
+  "meta": {
+    "source_lang": "ru",
+    "locked": true,
+    "entry_count": 4
+  },
+  "entries": [
+    {
+      "source": "ООН",
+      "target": "联合国",
+      "lemma": "ООН",
+      "zh": "联合国",
+      "entity_type": "ORG",
+      "confidence": 1.0,
+      "sources_count": 3,
+      "domains": ["un", "manual"],
+      "locked": true,
+      "note": "anchor"
+    },
+    {
+      "source": "Организация Объединённых Наций",
+      "target": "联合国",
+      "lemma": "Организация Объединённых Наций",
+      "zh": "联合国",
+      "entity_type": "ORG",
+      "confidence": 1.0,
+      "sources_count": 2,
+      "domains": ["un", "manual"],
+      "locked": true
+    },
+    {
+      "source": "ВОЗ",
+      "target": "世界卫生组织",
+      "lemma": "ВОЗ",
+      "zh": "世界卫生组织",
+      "entity_type": "ORG",
+      "confidence": 1.0,
+      "sources_count": 2,
+      "domains": ["un", "manual"],
+      "locked": true
+    },
+    {
+      "source": "Антониу Гутерриш",
+      "target": "古特雷斯",
+      "lemma": "Антониу Гутерриш",
+      "zh": "古特雷斯",
+      "entity_type": "PERSON",
+      "confidence": 1.0,
+      "sources_count": 2,
+      "domains": ["un", "manual"],
+      "locked": true
+    }
+  ]
+}

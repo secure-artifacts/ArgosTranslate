@@ -29,26 +29,15 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install argostranslategui PyQt5
+          pip install argostranslategui PyQt5 pyinstaller
           New-Item -ItemType Directory -Force -Path venv/Lib/site-packages/argostranslategui | Out-Null
           Copy-Item patches/argostranslategui_gui.py venv/Lib/site-packages/argostranslategui/gui.py
 
       - name: Build portable update package
         run: python tools/build_update_package.py
 
-      - name: Build launcher executable
-        shell: pwsh
-        run: |
-          pip install pyinstaller
-          Push-Location tools
-          python -c "from build_app_launcher import _write_stub; _write_stub()"
-          Pop-Location
-          $args = @(
-            '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed',
-            '--name', 'ArgosTranslate-launcher', 'launcher_stub.py'
-          )
-          if (Test-Path assets/app_icon.ico) { $args += @('--icon', 'assets/app_icon.ico') }
-          python @args
+      - name: Build one-click setup executable
+        run: python tools/build_portable_setup.py
 
       - name: Stage release artifacts
         shell: pwsh
@@ -57,9 +46,9 @@ jobs:
           $zip = Get-ChildItem dist/update/*.zip | Select-Object -First 1
           if (-not $zip) { throw "Update zip not found" }
           Copy-Item $zip.FullName "dist_final/ArgosTranslate-${{ github.ref_name }}.zip"
-          $exe = Get-ChildItem dist/ArgosTranslate-launcher.exe -ErrorAction SilentlyContinue
+          $exe = Get-ChildItem dist/ArgosTranslate.exe -ErrorAction SilentlyContinue
           if ($exe) {
-            Copy-Item $exe.FullName "dist_final/ArgosTranslate-launcher-${{ github.ref_name }}.exe"
+            Copy-Item $exe.FullName "dist_final/ArgosTranslate-${{ github.ref_name }}.exe"
           }
 
       - name: Attest Build Provenance

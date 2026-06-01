@@ -74,7 +74,14 @@
     {"wrong": "великий пост", "right": "Великий пост", "note": "Great Lent caps"},
     {"wrong": "страстная неделя", "right": "Страстная неделя", "note": "Holy Week caps"},
     {"wrong": "pastor", "right": "пастор", "note": "Protestant pastor translit"},
-    {"wrong": "monastery монастырь", "right": "монастырь", "note": "English residue"}
+    {"wrong": "monastery монастырь", "right": "монастырь", "note": "English residue"},
+    {"wrong": "принимать место", "right": "происходить", "note": "take place calque"},
+    {"wrong": "принимает место", "right": "происходит", "note": "take place finite"},
+    {"wrong": "приняло место", "right": "произошло", "note": "past calque"},
+    {"wrong": "божественная литургия", "right": "Божественная литургия", "note": "Orthodox caps — also in zh calque path"},
+    {"wrong": "патриарх московский", "right": "Патриарх Московский", "note": "title caps"},
+    {"wrong": "священное писание", "right": "Священное Писание", "note": "Scripture caps"},
+    {"wrong": "propоведь", "right": "проповедь", "note": "mixed script typo"}
   ],
   "uk": [
     {"wrong": "робити молитву", "right": "молитися", "note": "做祷告 calque"},
@@ -114,6 +121,8 @@
     {"wrong": "православна церква", "right": "Православна Церква", "note": "Orthodox Church caps"},
     {"wrong": "католицька церква", "right": "Католицька Церква", "note": "Catholic Church caps"},
     {"wrong": "божественна літургія", "right": "Божественна літургія", "note": "Divine Liturgy caps"},
-    {"wrong": "великий піст", "right": "Великий піст", "note": "Great Lent caps"}
+    {"wrong": "великий піст", "right": "Великий піст", "note": "Great Lent caps"},
+    {"wrong": "приймає місце", "right": "відбувається", "note": "take place calque UK"},
+    {"wrong": "приймати місце", "right": "відбуватися", "note": "take place UK inf"}
   ]
 }

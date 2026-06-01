@@ -1,0 +1,2 @@
+# 可选：UN 两阶段配对 embedding rerank（不装则回退轻量相似度）
+sentence-transformers>=2.7.0

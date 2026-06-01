@@ -2,6 +2,23 @@
 
 Windows 便携本地翻译软件：Argos Translate + Ollama（Qwen）双引擎，侧重中文 ↔ 俄语 / 乌克兰语，含术语库、斯拉夫语形态后处理与离线语音。
 
+## 翻译引擎（用户自选）
+
+顶栏下拉框 **「Argos 快」/「Ollama 精」**，选择会写入 `data/config/argos-translate/settings.json`，下次启动保持上次选择。
+
+| 选项 | 特点 |
+|------|------|
+| **Argos 快** | 预热后短句约秒级；俄/乌术语库与后处理保准度 |
+| **Ollama 精** | 本地大模型，较慢；首次需顶栏「下载引擎」 |
+
+固定译法、人名、教术语 → 用「术语库」维护（中文源时生效）。
+
+## 检查更新
+
+顶栏 **「检查更新」** 或菜单同名项：从 GitHub [secure-artifacts/ArgosTranslate](https://github.com/secure-artifacts/ArgosTranslate/releases) 拉取最新 Release 的 `ArgosTranslate-vX.Y.Z.zip` 并就地覆盖程序文件（保留 `data/`）。更新完成后请重启软件。
+
+可选配置 `data/config/argos-translate/settings.json`：`"ARGOS_GITHUB_REPO": "组织/仓库名"`。
+
 ## 功能
 
 - 多语言翻译（Argos 离线包 + 可选 Ollama 大模型）
@@ -9,14 +26,15 @@ Windows 便携本地翻译软件：Argos Translate + Ollama（Qwen）双引擎�
 - 基督教/专业/宗教领域搭配与文体规范化
 - 离线语音识别（Vosk，需本地下载模型）
 
-## 安装（首次）
+## 安装（用户）
 
-1. 从 [Releases](https://github.com/secure-artifacts/ArgosTranslate/releases) 下载 `ArgosTranslate-vX.Y.Z.zip`（更新包）与可选的 `ArgosTranslate-launcher-vX.Y.Z.exe`
-2. 解压到固定目录（例如 `D:\Apps\ArgosTranslate`）
-3. 按首次部署说明创建 `venv` 并安装依赖（见下方「开发环境」）
-4. 双击 `run_gui.bat` 或 launcher exe 启动
+1. 从 [Releases](https://github.com/secure-artifacts/ArgosTranslate/releases) 下载 **`ArgosTranslate-vX.Y.Z.exe`**（一键安装程序，仅需此文件）
+2. 双击 exe → **选择安装文件夹**（任意盘符）→ 自动安装（首次需联网，约数分钟）
+3. 以后只需再双击同一 exe 即可打开软件
+4. 菜单 **「安装位置…」** 可改指向的文件夹，或在空目录 **重新自动安装**
 
-> 发布 zip 为**就地更新包**（程序与脚本）；语言包、模型与 `data/local` 仍保留在本地，不会被覆盖。
+> 更新包 zip 供已有完整目录就地升级；新用户只需 exe。  
+> 开发者本地仍可用 `run_gui.bat`（见下方「开发环境」）。
 
 ## 开发环境
 

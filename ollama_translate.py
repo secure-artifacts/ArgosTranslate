@@ -184,6 +184,11 @@ def _settings_path() -> Path:
     return portable_root() / "data" / "config" / "argos-translate" / "settings.json"
 
 
+def invalidate_settings_cache() -> None:
+    global _SETTINGS_CACHE
+    _SETTINGS_CACHE = None
+
+
 def _load_settings() -> dict[str, str]:
     global _SETTINGS_CACHE
     if _SETTINGS_CACHE is not None:
@@ -202,6 +207,20 @@ def _load_settings() -> dict[str, str]:
     return out
 
 
+def write_settings(updates: dict[str, str]) -> None:
+    """合并写入便携 settings.json，并同步当前进程环境变量。"""
+    global _SETTINGS_CACHE
+    path = _settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = dict(_load_settings())
+    for key, value in updates.items():
+        data[str(key)] = str(value)
+        os.environ[str(key)] = str(value)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    _SETTINGS_CACHE = data
+
+
 def _setting(key: str, default: str = "") -> str:
     env_key = key
     if os.environ.get(env_key, "").strip():
@@ -210,8 +229,42 @@ def _setting(key: str, default: str = "") -> str:
 
 
 def use_ollama_backend() -> bool:
-    flag = _setting("ARGOS_USE_OLLAMA", "1")
+    flag = _setting("ARGOS_USE_OLLAMA", "0")
     return flag.lower() in ("1", "true", "yes", "on")
+
+
+def set_use_ollama_backend(use_ollama: bool) -> None:
+    write_settings({"ARGOS_USE_OLLAMA": "1" if use_ollama else "0"})
+
+
+def engine_source_placeholder() -> str:
+    base = (
+        "在此输入要翻译的原文（支持大段文字）。"
+        "合同/法律类务必人工校对；固定译法请写入「术语库」。"
+    )
+    if use_ollama_backend():
+        return (
+            f"{base}\n"
+            f"当前引擎：Ollama + {model_name()}（本地大模型，较慢、偏精译）。"
+            "首次使用请点顶栏「下载引擎」。"
+        )
+    return (
+        f"{base}\n"
+        "当前引擎：Argos 强化（多核加速；短/中/长句分档译全；宗教·成语·变格；错句自动修补）。"
+        "顶栏可切换 Ollama 精译（更慢，仅极难句可选）。"
+    )
+
+
+def engine_target_placeholder() -> str:
+    if use_ollama_backend():
+        return (
+            f"译文将显示在此处。\n"
+            f"当前：Ollama + {model_name()}（100% 本地）。"
+        )
+    return (
+        "译文将显示在此处。\n"
+        "当前：Argos 强化离线译（默认推荐）。固定译法请用「术语库」。"
+    )
 
 
 def model_name() -> str:
@@ -329,41 +382,21 @@ def _system_prompt_for(to_code: str) -> str:
 
 
 def _pair_specific_hints(from_code: str, to_code: str) -> str:
-    """语言对补充说明（文学/比喻类文本常见方向）。"""
+    """语言对补充说明（与 Argos 后处理共用 slavic_translation_hints）。"""
+    try:
+        import slavic_translation_hints as sth
+
+        return sth.ollama_pair_hints(from_code, to_code)
+    except ImportError:
+        pass
     src = (from_code or "").strip().lower()
     tgt = (to_code or "").strip().lower()
-    hints: list[str] = []
     if src in ("zh", "zt") and tgt in ("ru", "uk"):
-        hints.append(
-            "Chinese→Slavic: chengyu, classical allusions, and poetic imagery "
-            "need idiomatic target-language equivalents, not character-by-character "
-            "or image-by-image calques."
+        return (
+            "Chinese→Slavic: use idiomatic equivalents. "
+            "Christian text: correct liturgical register and capitalization."
         )
-        hints.append(
-            "Pay strict attention to Russian/Ukrainian case government, "
-            "adjective–noun agreement, and verb conjugation in every sentence—not only "
-            "for terminology placeholders."
-        )
-        hints.append(
-            "Christian religious text (Orthodox / Catholic / Protestant): choose "
-            "register by context. Orthodox: Божественная литургия, храм, Богородица, "
-            "Причастие, Пасха, патриарх. Catholic: месса, папа римский, кардинал, "
-            "Ватикан; still молиться (not делать молитву). Protestant: пастор, "
-            "проповедь, церковь. Capitalize theonyms and fixed phrases (Слава Богу, "
-            "Господи, помилуй, Иисус Христос). 福音 = Евангелие (Gospel), not "
-            "'good news'."
-        )
-    elif tgt in ("zh", "zt") and src in ("ru", "uk", "en", "fr", "de", "es"):
-        hints.append(
-            "When the source uses culture-specific idioms or figurative speech, "
-            "render the pragmatic meaning in natural Simplified Chinese."
-        )
-    elif src == "en" or tgt == "en":
-        hints.append(
-            "English phrasal verbs, idioms, and figurative compounds require "
-            "sense-based translation, not literal decomposition."
-        )
-    return "\n".join(hints)
+    return ""
 
 
 def _build_prompt(

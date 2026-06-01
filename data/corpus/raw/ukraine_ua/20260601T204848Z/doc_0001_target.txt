@@ -1,0 +1,20 @@
+Wayback Machine
+26 captures
+31 Aug 2021 - 05 Aug 2025
+Nov
+DEC
+Jan
+25
+2023
+2024
+2025
+success
+fail
+About this capture
+COLLECTED BY
+Organization: National Library of Israel
+Data collected by Internet Archive on behalf of the National Library of Israel. This data is currently not publicly accessible.
+Collection: NLIL 2024-25 Domain Crawl
+Domain crawl of the Israel web domain (.il) performed by Internet Archive in December 2024 - January 2025 on behalf of the National Library of Israel.
+TIMESTAMPS
+The Wayback Machine - https://web.archive.org/web/20241225114649/https://ukraine.ua/zh/feed/

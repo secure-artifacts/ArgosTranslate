@@ -15,55 +15,12 @@ STUB = ROOT / "launcher_stub.py"
 
 
 def _write_stub() -> None:
-    STUB.write_text(
-        '''"""PyInstaller 用：只启动 venv pythonw，不导入 argostranslate。"""
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-def find_root():
-    start = Path(sys.executable).resolve().parent
-    for cand in (start, *start.parents[:8]):
-        if (cand / "terminology_bridge.py").is_file():
-            return cand
-    return start
-
-def main():
-    root = find_root()
-    pyw = root / "venv" / "Scripts" / "pythonw.exe"
-    script = root / "portable_launcher.py"
-    if not pyw.is_file() or not script.is_file():
-        if sys.platform == "win32":
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                f"缺少文件：\\n{pyw}\\n{script}",
-                "本地翻译器",
-                0x10,
-            )
-        return 1
-    env = os.environ.copy()
-    env.setdefault("XDG_DATA_HOME", str(root / "data" / "local"))
-    env.setdefault("XDG_CONFIG_HOME", str(root / "data" / "config"))
-    env.setdefault("XDG_CACHE_HOME", str(root / "data" / "cache"))
-    env.setdefault("PYTHONUTF8", "1")
-    env.setdefault("PYTHONIOENCODING", "utf-8")
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0x8) if sys.platform == "win32" else 0
-    subprocess.Popen(
-        [str(pyw), str(script)],
-        cwd=str(root),
-        env=env,
-        creationflags=flags,
-        close_fds=True,
-    )
-    return 0
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-''',
-        encoding="utf-8",
-    )
+    """使用仓库根目录 launcher_stub.py（含安装路径记忆与友好报错）。"""
+    src = ROOT / "launcher_stub.py"
+    if not src.is_file():
+        print("[ERROR] launcher_stub.py missing")
+        raise SystemExit(1)
+    STUB.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def main() -> int:
@@ -90,6 +47,10 @@ def main() -> int:
         "--windowed",
         "--name",
         "本地翻译器",
+        "--paths",
+        str(ROOT),
+        "--hidden-import",
+        "portable_paths",
         "--distpath",
         str(out_dir),
         "--workpath",

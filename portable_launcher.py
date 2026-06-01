@@ -12,6 +12,16 @@ from pathlib import Path
 
 
 def find_portable_root() -> Path:
+    try:
+        from portable_paths import find_portable_root as _find
+
+        if getattr(sys, "frozen", False):
+            start = Path(sys.executable).resolve().parent
+        else:
+            start = Path(__file__).resolve().parent
+        return _find(start)
+    except ImportError:
+        pass
     if getattr(sys, "frozen", False):
         start = Path(sys.executable).resolve().parent
     else:
@@ -37,7 +47,6 @@ def _apply_portable_env(root: Path) -> dict[str, str]:
     env.setdefault("CUDA_VISIBLE_DEVICES", "")
     env.setdefault("CTRANSLATE2_LOG_LEVEL", "ERROR")
     env.setdefault("ARGOS_DEVICE_TYPE", "cpu")
-    env.setdefault("ARGOS_USE_OLLAMA", "1")
     env.setdefault("OLLAMA_MODEL", "qwen2.5:7b")
     env.setdefault("OMP_NUM_THREADS", "1")
     if sys.platform == "win32":
@@ -101,6 +110,20 @@ def _bootstrap_for_gui(root: Path) -> None:
         sys.path.insert(0, str(root))
     for k, v in _apply_portable_env(root).items():
         os.environ[k] = v
+    try:
+        import importlib.util
+
+        patch_tool = root / "tools" / "apply_portable_gui_patch.py"
+        if patch_tool.is_file():
+            spec = importlib.util.spec_from_file_location(
+                "apply_portable_gui_patch", patch_tool
+            )
+            if spec is not None and spec.loader is not None:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.apply()
+    except Exception:
+        pass
 
 
 def _apply_fast_startup_env() -> None:
@@ -113,11 +136,16 @@ def _launch_via_venv_pythonw(root: Path) -> int:
     """打包 exe 只做启动器，实际 GUI 在 venv 的 pythonw 中运行（避免缺 stdlib）。"""
     pyw = root / "venv" / "Scripts" / "pythonw.exe"
     script = root / "portable_launcher.py"
-    if not pyw.is_file():
-        _show_error(f"未找到 Python：\n{pyw}")
-        return 1
-    if not script.is_file():
-        _show_error(f"未找到启动脚本：\n{script}")
+    if not pyw.is_file() or not script.is_file():
+        try:
+            from portable_paths import missing_install_message
+
+            _show_error(missing_install_message(root))
+        except ImportError:
+            _show_error(
+                f"未找到完整安装目录。\n\n{pyw}\n{script}\n\n"
+                "请勿只把 exe 放在「下载」文件夹，详见 命令\\首次安装说明.txt"
+            )
         return 1
     env = _apply_portable_env(root)
     log_dir = root / "data" / "logs"
@@ -155,8 +183,22 @@ def main() -> int:
     if getattr(sys, "frozen", False):
         return _launch_via_venv_pythonw(root)
 
+    try:
+        from portable_paths import is_install_root, save_install_pointer
+
+        if is_install_root(root):
+            save_install_pointer(root)
+    except ImportError:
+        pass
+
     _bootstrap_for_gui(root)
     _apply_fast_startup_env()
+    try:
+        import argos_enhance as ae
+
+        ae.bootstrap_on_startup()
+    except ImportError:
+        pass
     try:
         import startup_warmup as sw
 

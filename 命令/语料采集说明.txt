@@ -1,0 +1,93 @@
+语料 → glossary / TM 链路（优先）
+================================
+
+【目标】高质量术语库 + 高质量 TM，长期复用；暂不扩展新 UI/新模型。
+
+【目录】
+  data/corpus/tm/corpus_tm.sqlite          — TM
+  data/corpus/aligned/*.jsonl              — 段落级+句级对齐（含 source_url、domain）
+  data/glossary/corpus/*_uk_zh.json         — 自动抽取：names/places/military/political
+  data/glossary/pending/conflicts.json     — 译名冲突（人工确认前勿 merge）
+  data/corpus/reports/metrics.jsonl        — TM 命中率、术语覆盖率等指标
+  data/corpus/reports/tm_hits.log          — 翻译时 TM 命中日志
+
+【Ukraine.ua 注意】
+  已暂停 Wayback 灌库（默认 offline；Wayback 需 UKRAINE_UA_ALLOW_WAYBACK=1）。
+  官网 Cloudflare 403；请用 offline_html 提供真实乌/中页面。
+
+【质量门禁】
+  corpus_quality_score < 0.52 → data\corpus\quarantine\（不入 TM）
+  污染 TM 清理：venv\Scripts\python.exe tools\purge_tm_domain.py ukraine_ua
+
+【采集日志】
+  logs\crawl_{source}_{时间}.json — 每页 URL、成败原因、示例句对/术语
+
+【UN 定位】
+  不适合自动大规模 TM；仅 style/diplomatic 参考。
+  两阶段：candidate_pairs → embedding rerank → manual_review_queue
+  默认 UN_AUTO_TM=0（不自动灌 TM）
+
+【人工白名单 / 黄金语料】
+  data\corpus\manual_review_queue\un\pending.jsonl
+  data\corpus\gold_corpus\un\              — 人工确认后
+  门槛：pair_conf≥0.90 · topic≥3 · article_purity≥0.75
+  列出：venv\Scripts\python.exe tools\review_manual_queue.py --list
+  批准入库：venv\Scripts\python.exe tools\review_manual_queue.py --approve "ru_url|zh_url"
+
+【锁定术语】
+  data\glossary\locked_glossary\locked_ru_zh.json — 禁止自动覆盖
+  data\glossary\locked_glossary\locked_uk_zh.json — uk↔zh 锁定专名
+
+【翻译评估】
+  data\corpus\translation_eval\test_sets\
+    politics_ru_zh · military_uk_zh · long_sentence_un · zh_ru_grammar · named_entities
+  指标：glossary_hit_rate · locked_entity_consistency · grammar_error_rate
+        long_sentence_readability · hallucination_rate · entity_recall · tm_hit_rate
+  venv\Scripts\python.exe tools\run_translation_eval.py --run-all
+  venv\Scripts\python.exe tools\run_translation_eval.py --run politics_ru_zh
+
+【Ukraine.ua offline — 黄金 uk↔zh 资产】
+  manifest：data\corpus\raw\ukraine_ua\manifest.json
+  HTML：data\corpus\raw\ukraine_ua\offline_html\{slug}.zh.html + .uk.html
+  优先 domain：news / politics / military / diplomacy / international
+  避免：tourism / promo / media / video
+  扫描 manifest：venv\Scripts\python.exe tools\ingest_ukraine_offline.py --sync-manifest
+  添加条目：venv\Scripts\python.exe tools\ingest_ukraine_offline.py --add-entry SLUG --domain politics --reviewed
+  检查：venv\Scripts\python.exe tools\ingest_ukraine_offline.py --check
+  采集（仅 reviewed=true）：venv\Scripts\python.exe tools\ingest_ukraine_offline.py --run
+  默认 UKRAINE_MANIFEST_REVIEWED_ONLY=1
+
+【TM 纯度】
+  tm_purity_score 写入 TM；低纯度 fuzzy 降权
+  ARGOS_TM_MIN_PURITY=0.55（默认）
+
+【采集命令】
+  set UKRAINE_UA_FETCH_MODE=wayback
+  venv\Scripts\python.exe tools\run_corpus_pipeline.py --source ukraine_ua --max-pages 50
+  venv\Scripts\python.exe tools\print_crawl_summary.py ukraine_ua
+  venv\Scripts\python.exe tools\run_corpus_pipeline.py --source ukraine_ua --full
+  venv\Scripts\python.exe tools\run_corpus_pipeline.py --source un --max-pages 30
+  venv\Scripts\python.exe tools\run_corpus_pipeline.py --source opus
+  venv\Scripts\python.exe tools\run_corpus_pipeline.py --detect-conflicts
+  venv\Scripts\python.exe tools\run_corpus_pipeline.py --metrics
+
+【合并术语（须人工确认）】
+  1. 先跑 --detect-conflicts，编辑 pending\conflicts.json
+  2. 再：--merge-glossary --confirm-merge
+  locked: true 的专名永不自动覆盖
+
+【翻译时 TM】
+  ARGOS_USE_TM=1（默认）
+  ARGOS_TM_MIN_RATIO=0.93
+  命中：译文区状态显示「TM模糊命中 96% · un_diplomatic」
+  详情：data\corpus\reports\tm_hits.log
+
+【质量过滤】
+  俄/乌语言误判、HTML/OCR 噪声、机翻痕迹、重复句、长度异常
+
+【指标】
+  tm_hit_rate、sentence_align_success_rate、long_sentence_split_rate
+  glossary_coverage、entity_consistency（俄乌同 lemma 不同中文）
+
+【OPUS/TED 本地】
+  data\corpus\raw\opus\  ·  data\corpus\raw\ted\

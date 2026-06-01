@@ -16,9 +16,9 @@ _GLOSSA_ANY = re.compile(
 
 # 非 CJK 单行硬切上限
 DEFAULT_MAX_RUN = 9000
-# Argos + 中文：按句合并后的段长（原 320 过碎，长文易前后不一致）
-CJK_MT_MAX_RUN = 960
-CJK_SPLIT_WHEN_LINE_GE = 480
+# Argos + 中文：按句合并段长（更大段→更少 CT2 次推理；段内仍保留句界上下文）
+CJK_MT_MAX_RUN = 1280
+CJK_SPLIT_WHEN_LINE_GE = 600
 # Ollama：尽量整段送入，由 LLM 侧再分块
 LLM_CJK_MAX_RUN = 3200
 LLM_SPLIT_WHEN_LINE_GE = 1400

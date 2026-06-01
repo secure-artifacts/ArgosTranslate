@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "updated_at": "2026-06-01T00:00:00Z",
+  "notes": "人工放置 HTML 到 offline_html/ 后运行 ingest_ukraine_offline.py --sync-manifest",
+  "entries": [
+    {
+      "slug": "example-politics-placeholder",
+      "uk_file": "example-politics-placeholder.uk.html",
+      "zh_file": "example-politics-placeholder.zh.html",
+      "domain": "politics",
+      "reviewed": false,
+      "notes": "删除此占位条目；放入真实 slug 与 HTML 后设 reviewed=true"
+    }
+  ]
+}

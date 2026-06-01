@@ -1,0 +1,2 @@
+{"id": "smoke_ru_zh_01", "source": "Организация Объединённых Наций призвала к прекращению огня.", "reference": "联合国呼吁停火。", "source_lang": "ru", "target_lang": "zh", "tags": ["smoke", "diplomatic"]}
+{"id": "smoke_zh_ru_01", "source": "世界卫生组织警告埃博拉疫情风险。", "reference": "Всемирная организация здравоохранения предупредила о риске вспышки Эболы.", "source_lang": "zh", "target_lang": "ru", "tags": ["smoke", "health"]}

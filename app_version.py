@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "本地翻译器（俄乌）"
-APP_VERSION = "1.0.0"
-APP_BUILD = "20260521"
+APP_VERSION = "1.1.0"
+APP_BUILD = "20260531"
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 

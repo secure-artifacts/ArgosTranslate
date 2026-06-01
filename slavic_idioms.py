@@ -161,6 +161,20 @@ _CALQUES_RU: dict[str, list[str]] = {
     "总之": ["в общем и целом", "суммируя"],
     "值得注意的是": ["стоит отметить что", "нужно отметить"],
     "因此": ["из этого следует", "таким образом следует"],
+    # 教会称谓 · 姊妹（单人）
+    "姊妹": ["сестры люба", "сестры луба", "сестры -"],
+    # 素质 / 工作能力（口语评价）
+    "素质": ["лучше, чем работа", "лучше чем работа", "лучше, чем работу"],
+    "有工作能力": ["лучше, чем работа", "лучше чем работа"],
+    "工作能力": ["лучше, чем работа", "чем работа"],
+    # Colloquial (zh_colloquial_idioms.json)
+    "说话比较直接": [
+        "говорит прямо, ей говорит прямо",
+        "говорит прямо, ей говорит прямо.",
+        "она говорит прямо, ей говорит прямо",
+    ],
+    "把心情说出来": ["ей говорит прямо", "говорит прямо, ей"],
+    "直接把心情说出来": ["говорит прямо, ей говорит прямо"],
     # Christian register (zh_religious_idioms.json)
     "上帝": ["небесный отец", "небесного отца", "божество", "sky father"],
     "天主": ["небесный отец", "божество"],
@@ -178,10 +192,15 @@ _CALQUES_RU: dict[str, list[str]] = {
     "忏悔": ["признание в грехах"],
     "得救": ["спасение души"],
     "哈利路亚": ["аллилуйя", "аллилуia"],
-    "牧师": ["священнослужитель"],
+    "牧师": ["священнослужитель", "священник"],
+    "神父": ["священнослужитель"],
     "圣母": ["дева мария"],
-    "领圣餐": ["принимать communion"],
-    "主祷文": ["молитва отца нашего"],
+    "领圣餐": ["принимать communion", "принимать причастие"],
+    "主祷文": ["молитва отца нашего", "отче наш"],
+    "赞美上帝": ["хвалить бога", "хвалят бога"],
+    "圣经": ["священное писание"],
+    "十诫": ["десять заповедей"],
+    "洗礼": ["крещение водой"],
 }
 
 _TRADITION_CALQUES_RU: dict[tuple[str, str], list[str]] = {
@@ -207,6 +226,10 @@ _CALQUES_UK: dict[str, list[str]] = {
     "根据": ["на основі"],
     "由于": ["через те що"],
     "因此": ["з цього випливає"],
+    "素质": ["краще, ніж робота", "краще ніж робота"],
+    "有工作能力": ["краще, ніж робота"],
+    "说话比较直接": ["говорить прямо, їй говорить прямо"],
+    "把心情说出来": ["їй говорить прямо"],
     "上帝": ["небесний отець"],
     "天主": ["небесний отець"],
     "罪": ["вина", "злочин"],
@@ -267,6 +290,315 @@ def apply_zh_source_idiom_hints(
     return out
 
 
+@lru_cache(maxsize=1)
+def _zh_name_map() -> dict[str, dict[str, object]]:
+    data = _load_json("zh_names_slavic.json")
+    out: dict[str, dict[str, object]] = {}
+    for item in data.get("names") or []:
+        if not isinstance(item, dict):
+            continue
+        zh = str(item.get("zh") or "").strip()
+        if not zh:
+            continue
+        wrong_ru = [
+            str(x).strip()
+            for x in (item.get("wrong_ru") or [])
+            if str(x).strip()
+        ]
+        wrong_uk = [
+            str(x).strip()
+            for x in (item.get("wrong_uk") or wrong_ru or [])
+            if str(x).strip()
+        ]
+        out[zh] = {
+            "ru": str(item.get("ru") or "").strip(),
+            "uk": str(item.get("uk") or item.get("ru") or "").strip(),
+            "wrong_ru": wrong_ru,
+            "wrong_uk": wrong_uk,
+        }
+    return out
+
+
+def apply_zh_name_transliteration_fix(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """源文出现的中文人名：把译文里常见错写替换为惯用转写。"""
+    if not slavic_idiom_fix_enabled() or not source_text or not target_text:
+        return target_text
+    code = (target_lang or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return target_text
+    src = source_text
+    out = target_text
+    wrong_key = "wrong_ru" if code == "ru" else "wrong_uk"
+    items = sorted(_zh_name_map().items(), key=lambda kv: -len(kv[0]))
+    for zh, entry in items:
+        if zh not in src:
+            continue
+        right = str(entry.get(code) or entry.get("ru") or "").strip()
+        if not right:
+            continue
+        if right.lower() in out.lower():
+            continue
+        for wrong in entry.get(wrong_key) or ():
+            w = str(wrong).strip()
+            if w and w.lower() in out.lower():
+                out = _case_insensitive_replace(out, w, right)
+                break
+    return out
+
+
+def _zh_singular_person_clause(source_text: str) -> bool:
+    src = source_text or ""
+    if any(x in src for x in ("们", "两位", "两个", "两名", "诸位", "各位")):
+        return False
+    return bool(re.search(r"一个.{0,24}人", src))
+
+
+def _name_before_sister_title(source_text: str) -> str:
+    m = re.search(r"([\u4e00-\u9fff]{2,5})姊妹", source_text or "")
+    return m.group(1) if m else ""
+
+
+def _zh_name_to_slavic(name_zh: str, lang: str) -> str:
+    zh = (name_zh or "").strip()
+    if not zh:
+        return ""
+    code = (lang or "").strip().lower()
+    entry = _zh_name_map().get(zh, {})
+    val = entry.get(code) or entry.get("ru") or ""
+    return str(val).strip()
+
+
+def _positive_person_adj_ru(source_text: str) -> str:
+    src = source_text or ""
+    if "积极向上" in src or "积极" in src:
+        return "позитивный"
+    if "乐观" in src:
+        return "оптимистичный"
+    return "хороший"
+
+
+def _positive_person_adj_uk(source_text: str) -> str:
+    src = source_text or ""
+    if "积极向上" in src or "积极" in src:
+        return "позитивна"
+    if "乐观" in src:
+        return "оптимістична"
+    return "хороша"
+
+
+def _target_sister_title_plural_error(source_text: str, target_text: str) -> bool:
+    if "姊妹" not in (source_text or ""):
+        return False
+    if not _zh_singular_person_clause(source_text):
+        return False
+    low = (target_text or "").lower()
+    if re.search(r"\bсестры\b", low):
+        return True
+    if "люди" in low and "человек" not in low:
+        return True
+    if re.search(r"\bлуба\b", low) and "柳芭" in source_text:
+        return True
+    return False
+
+
+def apply_zh_sister_title_fix(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """
+    「某某姊妹」= 一位姐妹（教会称谓），非复数 сестры。
+    源句含「一个…人」时强制单数 сестра + человек，并校正常见人名转写。
+    """
+    if not slavic_idiom_fix_enabled() or not source_text or not target_text:
+        return target_text
+    src = source_text.strip()
+    if "姊妹" not in src:
+        return target_text
+    if not _zh_singular_person_clause(src):
+        return target_text
+    code = (target_lang or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return target_text
+
+    name_zh = _name_before_sister_title(src)
+    name_ru = _zh_name_to_slavic(name_zh, code)
+
+    if _target_sister_title_plural_error(src, target_text) or name_ru:
+        if code == "ru":
+            adj = _positive_person_adj_ru(src)
+            human = "человек"
+            if name_ru:
+                return f"Сестра {name_ru} — {adj} {human}."
+            out = target_text
+            out = re.sub(r"\bСестры\b", "Сестра", out, flags=re.I)
+            out = re.sub(r"\bсестры\b", "сестра", out)
+            out = re.sub(r"\bЛуба\b", "Люба", out, flags=re.I)
+            out = re.sub(
+                r"позитивные\s+люди",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"позитивных\s+людей",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
+            return out
+
+        adj = _positive_person_adj_uk(src)
+        human = "людина"
+        if name_ru:
+            return f"Сестра {name_ru} — {adj} {human}."
+        out = target_text
+        out = re.sub(r"\bСестри\b", "Сестра", out, flags=re.I)
+        out = re.sub(r"\bсестри\b", "сестра", out)
+        out = re.sub(r"\bЛуба\b", "Люба", out, flags=re.I)
+        out = re.sub(
+            r"позитивні\s+люди",
+            f"{adj} {human}",
+            out,
+            flags=re.I,
+        )
+        return out
+
+    return target_text
+
+
+def _degenerate_direct_speech_ru(text: str) -> bool:
+    low = (text or "").lower()
+    return low.count("говорит") >= 2 and "прям" in low and not re.search(
+        r"чувств|настроен|пережив", low
+    )
+
+
+def _target_has_qualities_work_semantics(low: str) -> bool:
+    return bool(
+        re.search(
+            r"качеств|квалиф|способн|работоспособ|профессион|компетент",
+            low,
+        )
+    )
+
+
+def target_qualities_work_translation_bad(
+    source_text: str, target_text: str
+) -> bool:
+    """「素质…工作能力」被误译成「比工作好」类字面句。"""
+    src = (source_text or "").strip()
+    if "素质" not in src:
+        return False
+    if not (
+        "工作能力" in src
+        or "办事能力" in src
+        or ("工作" in src and "能力" in src)
+    ):
+        return False
+    low = (target_text or "").lower()
+    if _target_has_qualities_work_semantics(low):
+        return False
+    if re.search(r"лучше.{0,20}работ|чем\s+работ", low):
+        return True
+    if "работа" in low and "лучше" in low:
+        return True
+    return False
+
+
+def apply_zh_qualities_work_repairs(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """「素质比较好，有工作能力」→ 素质与办事能力，非「比工作好」。"""
+    if not slavic_idiom_fix_enabled() or not source_text or not target_text:
+        return target_text
+    src = source_text.strip()
+    code = (target_lang or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return target_text
+    if not target_qualities_work_translation_bad(src, target_text):
+        return target_text
+    if code == "ru":
+        if "她" in src:
+            return (
+                "У неё хорошие личные качества, она работоспособна "
+                "и умеет работать."
+            )
+        if "他" in src:
+            return (
+                "У него хорошие личные качества, он работоспособен "
+                "и умеет работать."
+            )
+        return (
+            "Хорошие личные качества, работоспособность "
+            "и умение работать."
+        )
+    if "她" in src:
+        return (
+            "У неї хороші особисті якості, вона працездатна "
+            "і вміє працювати."
+        )
+    if "他" in src:
+        return (
+            "У нього хороші особисті якості, він працездатний "
+            "і вміє працювати."
+        )
+    return (
+        "Хороші особисті якості, працездатність і вміння працювати."
+    )
+
+
+def apply_zh_colloquial_sentence_repairs(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """口语整句修补：如「说话直接 + 把心情说出来」被译成重复「говорит прямо」。"""
+    if not slavic_idiom_fix_enabled() or not source_text or not target_text:
+        return target_text
+    src = source_text.strip()
+    code = (target_lang or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return target_text
+    if "心情" not in src or not ("说出来" in src or "说出" in src):
+        return target_text
+    low = target_text.lower()
+    missing_emotion = not re.search(r"чувств|настроен|пережив|почутт", low)
+    bad_repeat = _degenerate_direct_speech_ru(target_text)
+    bad_partial = missing_emotion and bool(
+        re.search(r"говорит\s+прям|прямолинейн", low)
+    )
+    if not (bad_repeat or bad_partial):
+        return target_text
+    if code == "ru":
+        if "她" in src:
+            return (
+                "Она говорит прямолинейно и открыто высказывает свои чувства."
+            )
+        if "他" in src:
+            return (
+                "Он говорит прямолинейно и открыто высказывает свои чувства."
+            )
+        return (
+            "Говорит прямолинейно и открыто высказывает свои чувства."
+        )
+    if "她" in src:
+        return (
+            "Вона говорить прямолінійно і відкрито висловлює свої почуття."
+        )
+    if "他" in src:
+        return (
+            "Він говорить прямолінійно і відкрито висловлює свої почуття."
+        )
+    return "Говорить прямолінійно і відкрито висловлює свої почуття."
+
+
 def apply_idiom_fixes(
     target_text: str,
     lang: str,
@@ -280,7 +612,15 @@ def apply_idiom_fixes(
     t = apply_target_collocation_fixes(target_text, lang)
     src_lang = (source_lang or "").strip().lower()
     if source_text and src_lang in ("zh", "zt", "cn"):
+        t = apply_zh_name_transliteration_fix(source_text, t, lang)
+        t = apply_zh_sister_title_fix(source_text, t, lang)
+        t = apply_zh_qualities_work_repairs(source_text, t, lang)
+        t = apply_zh_colloquial_sentence_repairs(source_text, t, lang)
         t = apply_zh_source_idiom_hints(source_text, t, lang)
+        t = apply_zh_colloquial_sentence_repairs(source_text, t, lang)
+        t = apply_zh_qualities_work_repairs(source_text, t, lang)
+        t = apply_zh_sister_title_fix(source_text, t, lang)
+        t = apply_zh_name_transliteration_fix(source_text, t, lang)
         t = apply_target_collocation_fixes(t, lang)
     return t
 

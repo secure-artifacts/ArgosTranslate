@@ -1125,6 +1125,14 @@ class GUIWindow(QMainWindow):
         self.ollama_setup_action.triggered.connect(
             self.ollama_setup_action_triggered
         )
+        self.engine_help_action = self.menu.addAction("翻译引擎说明…")
+        self.engine_help_action.triggered.connect(self.engine_help_action_triggered)
+        self.install_location_action = self.menu.addAction("安装位置…")
+        self.install_location_action.triggered.connect(
+            self.install_location_action_triggered
+        )
+        self.check_update_action = self.menu.addAction("检查更新…")
+        self.check_update_action.triggered.connect(self.check_update_action_triggered)
         self.about_action = self.menu.addAction("关于")
         self.about_action.triggered.connect(self.about_action_triggered)
         self.menu.setNativeMenuBar(False)
@@ -1158,6 +1166,27 @@ class GUIWindow(QMainWindow):
             self._chrome_gloss_btn.setObjectName("ChromeBtn")
             self._chrome_gloss_btn.setText("术语库")
             self._chrome_gloss_btn.clicked.connect(self.glossary_action_triggered)
+            self._chrome_engine_combo = None
+            if (self._portable_root / "ollama_translate.py").is_file():
+                from PyQt5.QtWidgets import QComboBox
+
+                self._chrome_engine_combo = QComboBox()
+                self._chrome_engine_combo.setObjectName("ChromeEngineCombo")
+                try:
+                    import translation_engine_ui as teu
+
+                    _eng_tip = teu.ENGINE_COMBO_TOOLTIP
+                except ImportError:
+                    _eng_tip = (
+                        "Argos 强化（默认）；Ollama 精译（慢，可选）。点「?」查看说明。"
+                    )
+                self._chrome_engine_combo.setToolTip(_eng_tip)
+                self._chrome_engine_combo.addItem("Argos 强化", "argos")
+                self._chrome_engine_combo.addItem("Ollama 精", "ollama")
+                self._chrome_engine_combo.currentIndexChanged.connect(
+                    self._on_translation_engine_combo_changed
+                )
+                self._sync_translation_engine_combo()
             self._chrome_engine_btn = None
             if (self._portable_root / "ollama_setup_dialog.py").is_file():
                 self._chrome_engine_btn = QToolButton()
@@ -1185,6 +1214,17 @@ class GUIWindow(QMainWindow):
                 self._chrome_notebook_btn.clicked.connect(
                     self.word_notebook_action_triggered
                 )
+            self._chrome_update_btn = None
+            if (self._portable_root / "update_dialog.py").is_file():
+                self._chrome_update_btn = QToolButton()
+                self._chrome_update_btn.setObjectName("ChromeBtn")
+                self._chrome_update_btn.setText("检查更新")
+                self._chrome_update_btn.setToolTip(
+                    "从 GitHub 检查并下载安装最新版本"
+                )
+                self._chrome_update_btn.clicked.connect(
+                    self.check_update_action_triggered
+                )
             self._chrome_about_btn = QToolButton()
             self._chrome_about_btn.setObjectName("ChromeBtn")
             self._chrome_about_btn.setText("关于")
@@ -1195,12 +1235,16 @@ class GUIWindow(QMainWindow):
             self._chrome_dark_btn.clicked.connect(self._toggle_dark_mode)
             ch_l.addWidget(self._chrome_pkg_btn)
             ch_l.addWidget(self._chrome_gloss_btn)
+            if self._chrome_engine_combo is not None:
+                ch_l.addWidget(self._chrome_engine_combo)
             if self._chrome_engine_btn is not None:
                 ch_l.addWidget(self._chrome_engine_btn)
             if self._chrome_hist_btn is not None:
                 ch_l.addWidget(self._chrome_hist_btn)
             if self._chrome_notebook_btn is not None:
                 ch_l.addWidget(self._chrome_notebook_btn)
+            if self._chrome_update_btn is not None:
+                ch_l.addWidget(self._chrome_update_btn)
             ch_l.addWidget(self._chrome_about_btn)
             ch_l.addWidget(self._chrome_dark_btn)
             self.window_layout.addWidget(chrome)
@@ -1581,6 +1625,49 @@ class GUIWindow(QMainWindow):
             return
         mod.open_setup_dialog(self, portable_root=self._portable_root)
 
+    def engine_help_action_triggered(self):
+        try:
+            import translation_engine_ui as teu
+        except ImportError:
+            QMessageBox.information(
+                self,
+                "翻译引擎",
+                "Argos 强化：默认主引擎（快，中→俄/乌已优化）。\n"
+                "Ollama：可选精译（慢，需下载引擎）。",
+            )
+            return
+        teu.show_engine_help(self)
+
+    def install_location_action_triggered(self):
+        try:
+            import install_location_dialog as ild
+        except ImportError:
+            QMessageBox.warning(self, "安装位置", "未找到 install_location_dialog.py。")
+            return
+        ild.open_install_location_dialog(self)
+
+    def check_update_action_triggered(self):
+        try:
+            import update_dialog as ud
+        except ImportError:
+            QMessageBox.warning(self, "检查更新", "未找到 update_dialog.py。")
+            return
+        ud.open_update_dialog(self)
+
+    def _sync_translation_engine_combo(self) -> None:
+        try:
+            import translation_engine_ui as teu
+        except ImportError:
+            return
+        teu.sync_engine_combo(getattr(self, "_chrome_engine_combo", None))
+
+    def _on_translation_engine_combo_changed(self, index: int) -> None:
+        try:
+            import translation_engine_ui as teu
+        except ImportError:
+            return
+        teu.apply_engine_choice(index == 1, host=self)
+
     def open_glossary_editor(self):
         mod = _import_glossary_editor_module()
         if mod is None:
@@ -1798,7 +1885,14 @@ class GUIWindow(QMainWindow):
         for tab in self._iter_tabs():
             tab.left_language_combo.setEnabled(True)
             tab.right_language_combo.setEnabled(True)
-            tab.right_textEdit.setPlaceholderText(placeholder)
+            if lightweight:
+                tab.right_textEdit.setPlaceholderText(placeholder)
+            else:
+                refresh_ph = getattr(tab, "refresh_engine_placeholders", None)
+                if callable(refresh_ph):
+                    refresh_ph()
+                else:
+                    tab.right_textEdit.setPlaceholderText(placeholder)
             tab.apply_language_combos(run_translate=False)
         QTimer.singleShot(150, self._finish_restoring_session)
         if lightweight and full_error and _is_torch_dll_init_error(full_error):

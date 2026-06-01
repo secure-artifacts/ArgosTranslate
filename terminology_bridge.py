@@ -531,4 +531,6 @@ def apply_glossary(
     if not slots:
         return tr(text)
     raw = tr(masked)
-    return restore_markers(raw, slots, to_code=to_code)
+    out = restore_markers(raw, slots, to_code=to_code)
+    # Argos 俄/乌后处理在 GUI update_right_textEdit 统一执行，此处不再重复（长文可省近一倍时间）
+    return out

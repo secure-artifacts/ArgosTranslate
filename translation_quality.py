@@ -1068,12 +1068,19 @@ def _fix_ru_to_uk_verb_deverbal_noun(source_ru: str, target_uk: str) -> str:
     return target_uk
 
 
+_GLOSSA_MARK = re.compile(
+    r"GLOSSA|ＧＬＯＳＳＡ|ГЛОССА",
+    re.I,
+)
+
+
 def postprocess_translation_target(
     text: str,
     lang_code: str,
     *,
     source_text: str | None = None,
     source_lang_code: str | None = None,
+    postprocess_depth: str = "normal",
 ) -> str:
     """
     俄/乌译文后处理链。lang_code: ``ru`` | ``uk``。
@@ -1144,19 +1151,31 @@ def postprocess_translation_target(
     except ImportError:
         pass
 
+    depth = (postprocess_depth or "normal").strip().lower()
+    need_morph = depth not in ("fast",) or bool(_GLOSSA_MARK.search(t))
+    if depth == "short":
+        need_morph = True
+    run_advanced = depth in ("full", "long")
+    morph_passes = 1 if depth in ("short", "normal", "long") else 2
+    advanced_passes = 1 if depth in ("long", "full") else 2
+
     try:
         import glossary_inflection as gi
 
-        if gi.slavic_morph_fix_enabled():
-            t = gi.fix_text_slavic_morphology(t, code)
+        if need_morph and gi.slavic_morph_fix_enabled():
+            t = gi.fix_text_slavic_morphology(
+                t, code, passes=morph_passes
+            )
     except ImportError:
         pass
 
     try:
         import slavic_advanced_morph as sam
 
-        if sam.advanced_slavic_morph_enabled():
-            t = sam.fix_text_advanced_slavic_morphology(t, code)
+        if run_advanced and sam.advanced_slavic_morph_enabled():
+            t = sam.fix_text_advanced_slavic_morphology(
+                t, code, passes=advanced_passes
+            )
     except ImportError:
         pass
 
