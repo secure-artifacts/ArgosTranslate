@@ -44,14 +44,21 @@ def _anti_mt_config() -> dict[str, Any]:
 
 
 def detect_domain(source_text: str, *, default: str = "news") -> str:
-    """根据中文源文关键词推断领域（politics/diplomacy/military/news）。"""
+    """根据中文源文关键词推断领域（politics/diplomacy/military/news/colloquial）。"""
     src = (source_text or "").strip()
     if not src:
         return default
     cfg = _phrase_config()
     kw_map = cfg.get("domain_keywords") or {}
     scores: dict[str, int] = {d: 0 for d in DOMAINS if d != "colloquial"}
+    colloquial_score = 0
     for dom, words in kw_map.items():
+        if dom == "colloquial":
+            for w in words or []:
+                ws = str(w).strip()
+                if ws and ws in src:
+                    colloquial_score += 1
+            continue
         if dom not in scores:
             continue
         for w in words or []:
@@ -59,6 +66,10 @@ def detect_domain(source_text: str, *, default: str = "news") -> str:
             if ws and ws in src:
                 scores[dom] += 1
     best = max(scores.items(), key=lambda x: x[1])
+    if colloquial_score >= 2 and best[1] <= 0:
+        return "colloquial"
+    if colloquial_score >= 2 and best[0] == "news" and best[1] <= 1:
+        return "colloquial"
     if best[1] <= 0:
         return default
     return best[0]

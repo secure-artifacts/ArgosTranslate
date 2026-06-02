@@ -15,6 +15,7 @@ from typing import Any
 _ROOT = Path(__file__).resolve().parent
 _TERM_DIR = _ROOT / "data" / "terminology"
 
+_TERM_CATEGORIES = ("political", "military", "entities", "daily", "places")
 _RU_WORD = re.compile(
     r"[А-Яа-яЁё][А-Яа-яЁё'\u02BC\u2019\u02B9\-]*"
 )
@@ -126,7 +127,7 @@ def _build_form_index(lang: str) -> dict[str, str]:
     data = _load_entities_and_terms()
     block = data.get(lang) or {}
     index: dict[str, str] = {}
-    for category in ("political", "military", "entities", "places"):
+    for category in _TERM_CATEGORIES:
         for item in block.get(category) or []:
             if not isinstance(item, dict):
                 continue
@@ -152,7 +153,7 @@ def _build_lemma_index(lang: str) -> dict[str, str]:
     data = _load_entities_and_terms()
     block = data.get(lang) or {}
     index: dict[str, str] = {}
-    for category in ("political", "military", "entities", "places"):
+    for category in _TERM_CATEGORIES:
         items = block.get(category) or []
         if not isinstance(items, list):
             continue
@@ -175,7 +176,7 @@ def _build_phrase_list(lang: str) -> list[tuple[str, str]]:
     data = _load_entities_and_terms()
     block = data.get(lang) or {}
     phrases: list[tuple[str, str]] = []
-    for category in ("entities", "political", "military", "places"):
+    for category in _TERM_CATEGORIES:
         for item in block.get(category) or []:
             if not isinstance(item, dict):
                 continue

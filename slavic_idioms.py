@@ -554,6 +554,97 @@ def apply_zh_qualities_work_repairs(
     )
 
 
+def _apply_zh_household_vocab_repairs(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """日常家居词汇：窗帘≠窗户；厚窗帘用 плотные шторы，不用 толстое окно。"""
+    src = (source_text or "").strip()
+    t = target_text or ""
+    code = (target_lang or "").strip().lower()
+    if not src or not t or code not in ("ru", "uk"):
+        return t
+    if "窗帘" not in src:
+        return t
+    thick = "更厚" in src or "厚一点" in src or "厚些" in src or "厚些" in src
+    bad_window = re.search(r"(?i)окн|вікн", t)
+    bad_thick = re.search(r"(?i)толст|товст", t)
+    bad_curtain = bad_window or (thick and bad_thick)
+    if not bad_curtain:
+        return t
+    if code == "ru":
+        if thick and ("有没有" in src or re.search(r"有.+?窗帘", src)):
+            return "Есть ли более плотные шторы?"
+        t = re.sub(r"(?i)окн\w+", "шторы", t)
+        if thick:
+            t = re.sub(r"(?i)более\s+толст\w+", "более плотные", t)
+            t = re.sub(r"(?i)\bтолст\w+\b", "плотные", t)
+        return t
+    if thick and ("有没有" in src or re.search(r"有.+?窗帘", src)):
+        return "Чи є більш щільні штори?"
+    t = re.sub(r"(?i)вікн\w+", "штори", t)
+    if thick:
+        t = re.sub(r"(?i)більш\s+товст\w+", "більш щільні", t)
+        t = re.sub(r"(?i)\bтовст\w+\b", "щільні", t)
+    return t
+
+
+def _apply_zh_colloquial_mt_repairs(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """口语机翻常见硬错：觉得/语气/自然/夸张等场景的 calque 修补。"""
+    src = (source_text or "").strip()
+    t = target_text or ""
+    code = (target_lang or "").strip().lower()
+    if not src or not t or code not in ("ru", "uk"):
+        return t
+    if code == "ru":
+        if ("这一遍" in src or "这一次" in src) and re.search(
+            r"(?i)\bты\s+говоришь\s+вс[её]\s+это\b", t
+        ):
+            t = re.sub(
+                r"(?i)\bты\s+говоришь\s+вс[её]\s+это\b",
+                "на этот раз",
+                t,
+                count=1,
+            )
+        if "自然" in src:
+            t = re.sub(
+                r"(?i)в\s+разговоре,\s*естественно,\s*что\s+речь\s+"
+                r"(?:идёт|идет)\s+о\s+чём-то|о\s+чем-то",
+                "речь звучит естественнее",
+                t,
+                count=1,
+            )
+            t = re.sub(
+                r"(?i)в\s+разговоре,\s*естественно,\s*что\s+речь\s+звучит",
+                "речь звучит",
+                t,
+                count=1,
+            )
+            t = re.sub(
+                r"(?i)\bречь\s+(?:идёт|идет)\s+речь\s+звучит",
+                "речь звучит",
+                t,
+                count=1,
+            )
+        if ("刻意" in src or "夸张" in src) and re.search(
+            r"(?i)мудр\w+\s+преувелич", t
+        ):
+            t = re.sub(
+                r"(?i)(?:без\s+(?:столь\s+|такой\s+)?|столь\s+|такого\s+)?"
+                r"мудр\w+\s+преувелич\w*",
+                "без такой намеренно преувеличенной интонации",
+                t,
+                count=1,
+            )
+        t = re.sub(r"(?i),\s*и\s+мне\s+кажется\b", ", мне кажется", t)
+    return t
+
+
 def apply_zh_colloquial_sentence_repairs(
     source_text: str,
     target_text: str,
@@ -562,20 +653,22 @@ def apply_zh_colloquial_sentence_repairs(
     """口语整句修补：如「说话直接 + 把心情说出来」被译成重复「говорит прямо」。"""
     if not slavic_idiom_fix_enabled() or not source_text or not target_text:
         return target_text
+    t = _apply_zh_household_vocab_repairs(source_text, target_text, target_lang)
+    t = _apply_zh_colloquial_mt_repairs(source_text, t, target_lang)
     src = source_text.strip()
     code = (target_lang or "").strip().lower()
     if code not in ("ru", "uk"):
-        return target_text
+        return t
     if "心情" not in src or not ("说出来" in src or "说出" in src):
-        return target_text
-    low = target_text.lower()
+        return t
+    low = t.lower()
     missing_emotion = not re.search(r"чувств|настроен|пережив|почутт", low)
     bad_repeat = _degenerate_direct_speech_ru(target_text)
     bad_partial = missing_emotion and bool(
         re.search(r"говорит\s+прям|прямолинейн", low)
     )
     if not (bad_repeat or bad_partial):
-        return target_text
+        return t
     if code == "ru":
         if "她" in src:
             return (

@@ -123,6 +123,14 @@ def postprocess_zh_to_slavic(
     except ImportError:
         pass
 
+    try:
+        import slavic_idioms as si
+
+        if si.slavic_idiom_fix_enabled():
+            t = si.apply_zh_colloquial_sentence_repairs(src, t, lang)
+    except ImportError:
+        pass
+
     t = prevent_cross_track_mixing(t, lang, source_text=src)
     return t.strip() if t else t
 

@@ -485,6 +485,16 @@ def _ru_fix_nesmotrya_na(s: str) -> str:
     return re.sub(r"(?i)\bне\s+смотря\s+на\b", "несмотря на", s)
 
 
+def _ru_fix_dative_first_person_mix(s: str) -> str:
+    """
+    与格代词 + 第一人称动词（*мне чувствую*）— 中→俄机译常见硬错。
+    """
+    t = re.sub(r"(?i)\bмне\s+чувствую\b", "мне кажется", s)
+    t = re.sub(r"(?i)\bмне\s+думаю\b", "я думаю", t)
+    t = re.sub(r"(?i)\bмне\s+понимаю\b", "я понимаю", t)
+    return t
+
+
 def _ru_fix_v_techenie_time_span(s: str) -> str:
     """
     表时长时误写 «в течении года» 等；应为 «в течение года»。
@@ -1125,6 +1135,7 @@ def postprocess_translation_target(
         t = _ru_fix_v_techenie_time_span(t)
         t = _ru_fix_nesmotrya_na(t)
         t = _ru_fix_to_est(t)
+        t = _ru_fix_dative_first_person_mix(t)
     elif code == "uk":
         t = _uk_drop_redundant_subject_before_u_noho_nemaye(t)
         if (source_lang_code or "").strip().lower() == "ru" and source_text:

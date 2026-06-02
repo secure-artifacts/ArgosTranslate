@@ -1,0 +1,602 @@
+{
+  "meta": {
+    "source_lang": "uk",
+    "target_lang": "zh",
+    "category": "daily",
+    "domain": "daily_life",
+    "sources": [
+      "Tatoeba CC BY 2.0 FR",
+      "Wiktionary",
+      "verified"
+    ],
+    "generated": "2026-06-02T00:00:26Z",
+    "merge_min_confidence": 0.72
+  },
+  "entries": [
+    {
+      "lemma": "штори",
+      "zh": "窗帘",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "вікно",
+      "zh": "窗户",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "двері",
+      "zh": "门",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "стіна",
+      "zh": "墙",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "підлога",
+      "zh": "地板",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "стеля",
+      "zh": "天花板",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "сходи",
+      "zh": "楼梯",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "ліфт",
+      "zh": "电梯",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "балкон",
+      "zh": "阳台",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "стіл",
+      "zh": "桌子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "стілець",
+      "zh": "椅子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "ліжко",
+      "zh": "床",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "диван",
+      "zh": "沙发",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "шафа",
+      "zh": "柜子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "книжкова полиця",
+      "zh": "书架",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "шухляда",
+      "zh": "抽屉",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "подушка",
+      "zh": "枕头",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "ковдра",
+      "zh": "被子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "ковдра",
+      "zh": "毯子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "простирадло",
+      "zh": "床单",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "рушник",
+      "zh": "毛巾",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "зубна щітка",
+      "zh": "牙刷",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "зубна паста",
+      "zh": "牙膏",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "мило",
+      "zh": "肥皂",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "шампунь",
+      "zh": "洗发水",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "кухня",
+      "zh": "厨房",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "спальня",
+      "zh": "卧室",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "туалет",
+      "zh": "卫生间",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "вітальня",
+      "zh": "客厅",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "їдальня",
+      "zh": "餐厅",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "холодильник",
+      "zh": "冰箱",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "пральна машина",
+      "zh": "洗衣机",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "кондиціонер",
+      "zh": "空调",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "телевізор",
+      "zh": "电视",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "комп'ютер",
+      "zh": "电脑",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "телефон",
+      "zh": "手机",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "лампа",
+      "zh": "灯",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "мікрохвильовка",
+      "zh": "微波炉",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "духовка",
+      "zh": "烤箱",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "чайник",
+      "zh": "水壶",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "каструля",
+      "zh": "锅",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "миска",
+      "zh": "碗",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "тарілка",
+      "zh": "盘子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "палички для їжі",
+      "zh": "筷子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "ложка",
+      "zh": "勺子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "ніж",
+      "zh": "刀",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "виделка",
+      "zh": "叉",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "чашка",
+      "zh": "杯子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "одяг",
+      "zh": "衣服",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "штани",
+      "zh": "裤子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "взуття",
+      "zh": "鞋子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "шапка",
+      "zh": "帽子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "шкарпетки",
+      "zh": "袜子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "пальто",
+      "zh": "外套",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "спідниця",
+      "zh": "裙子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "сорочка",
+      "zh": "衬衫",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "ключ",
+      "zh": "钥匙",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "гаманець",
+      "zh": "钱包",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "сумка",
+      "zh": "包",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "парасолька",
+      "zh": "伞",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "сміття",
+      "zh": "垃圾",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "смітник",
+      "zh": "垃圾桶",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "дзеркало",
+      "zh": "镜子",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "годинник",
+      "zh": "钟表",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    },
+    {
+      "lemma": "фотографія",
+      "zh": "照片",
+      "confidence": 0.95,
+      "entity_type": "daily",
+      "source": [
+        "verified"
+      ]
+    }
+  ]
+}

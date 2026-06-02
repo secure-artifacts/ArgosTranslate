@@ -1,127 +1,1702 @@
 {
   "meta": {
     "description": "双向术语：ru/uk↔zh。按轨分语言，禁止混用（如 亚历山大/奥列克桑德尔、Киев/Київ）。",
-    "priority": ["user_glossary", "locked", "entities", "military", "political", "zh_to", "language_rules", "model"],
+    "priority": [
+      "user_glossary",
+      "locked",
+      "entities",
+      "military",
+      "political",
+      "daily",
+      "zh_to",
+      "language_rules",
+      "model"
+    ],
     "bidirectional": true
   },
   "zh_to": {
-    "泽连斯基": {"ru": "Зеленский", "uk": "Зеленський", "locked": true},
-    "普京": {"ru": "Путин", "uk": "Путін", "locked": true},
-    "基辅": {"ru": "Киев", "uk": "Київ", "locked": true},
-    "亚历山大": {"ru": "Александр", "uk": "Олександр", "locked": true},
-    "奥列克桑德尔": {"ru": "Александр", "uk": "Олександр"},
-    "联合国": {"ru": "ООН", "uk": "ООН"},
-    "北约": {"ru": "НАТО", "uk": "НАТО"},
-    "中国政府": {"ru": "правительство Китая", "uk": "уряд Китаю"}
+    "泽连斯基": {
+      "ru": "Зеленский",
+      "uk": "Зеленський",
+      "locked": true
+    },
+    "普京": {
+      "ru": "Путин",
+      "uk": "Путін",
+      "locked": true
+    },
+    "基辅": {
+      "ru": "Киев",
+      "uk": "Київ",
+      "locked": true
+    },
+    "亚历山大": {
+      "ru": "Александр",
+      "uk": "Олександр",
+      "locked": true
+    },
+    "奥列克桑德尔": {
+      "ru": "Александр",
+      "uk": "Олександр"
+    },
+    "联合国": {
+      "ru": "ООН",
+      "uk": "ООН"
+    },
+    "北约": {
+      "ru": "НАТО",
+      "uk": "НАТО"
+    },
+    "中国政府": {
+      "ru": "правительство Китая",
+      "uk": "уряд Китаю"
+    },
+    "窗帘": {
+      "ru": "шторы",
+      "uk": "штори",
+      "wrong_ru": [
+        "окно",
+        "окна",
+        "окном",
+        "окну",
+        "окне"
+      ],
+      "wrong_uk": [
+        "вікно",
+        "вікна",
+        "вікном"
+      ],
+      "source": "international_vocab",
+      "confidence": 0.95
+    },
+    "窗户": {
+      "ru": "окно",
+      "uk": "вікно",
+      "source": "international_vocab",
+      "confidence": 0.95
+    },
+    "门": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "дверь",
+      "uk": "двері"
+    },
+    "墙": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "стена",
+      "uk": "стіна"
+    },
+    "地板": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "пол",
+      "uk": "підлога"
+    },
+    "天花板": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "потолок",
+      "uk": "стеля"
+    },
+    "桌子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "стол",
+      "uk": "стіл"
+    },
+    "椅子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "стул",
+      "uk": "стілець"
+    },
+    "床": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "кровать",
+      "uk": "ліжко"
+    },
+    "沙发": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "диван",
+      "uk": "диван"
+    },
+    "书架": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "книжная полка",
+      "uk": "книжкова полиця"
+    },
+    "抽屉": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "ящик",
+      "uk": "шухляда"
+    },
+    "枕头": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "подушка",
+      "uk": "подушка"
+    },
+    "被子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "одеяло",
+      "uk": "ковдра"
+    },
+    "毯子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "одеяло",
+      "uk": "ковдра"
+    },
+    "毛巾": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "полотенце",
+      "uk": "рушник"
+    },
+    "牙刷": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "зубная щётка",
+      "uk": "зубна щітка"
+    },
+    "牙膏": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "зубная паста",
+      "uk": "зубна паста"
+    },
+    "肥皂": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "мыло",
+      "uk": "мило"
+    },
+    "厨房": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "кухня",
+      "uk": "кухня"
+    },
+    "卧室": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "спальня",
+      "uk": "спальня"
+    },
+    "卫生间": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "туалет",
+      "uk": "туалет"
+    },
+    "客厅": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "гостиная",
+      "uk": "вітальня"
+    },
+    "餐厅": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "столовая",
+      "uk": "їдальня"
+    },
+    "冰箱": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "холодильник",
+      "uk": "холодильник"
+    },
+    "洗衣机": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "стиральная машина",
+      "uk": "пральна машина"
+    },
+    "空调": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "кондиционер",
+      "uk": "кондиціонер"
+    },
+    "电视": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "телевизор",
+      "uk": "телевізор"
+    },
+    "电脑": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "компьютер",
+      "uk": "комп'ютер"
+    },
+    "手机": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "телефон",
+      "uk": "телефон"
+    },
+    "灯": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "лампа",
+      "uk": "лампа"
+    },
+    "烤箱": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "духовка",
+      "uk": "духовка"
+    },
+    "碗": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "миска",
+      "uk": "миска"
+    },
+    "筷子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "палочки для еды",
+      "uk": "палички для їжі"
+    },
+    "勺子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "ложка",
+      "uk": "ложка"
+    },
+    "刀": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "нож",
+      "uk": "ніж"
+    },
+    "叉": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "вилка",
+      "uk": "виделка"
+    },
+    "杯子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "чашка",
+      "uk": "чашка"
+    },
+    "衣服": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "одежда",
+      "uk": "одяг"
+    },
+    "裤子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "брюки",
+      "uk": "штани"
+    },
+    "鞋子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "обувь",
+      "uk": "взуття"
+    },
+    "帽子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "шапка",
+      "uk": "шапка"
+    },
+    "袜子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "носки",
+      "uk": "шкарпетки"
+    },
+    "外套": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "пальто",
+      "uk": "пальто"
+    },
+    "裙子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "юбка",
+      "uk": "спідниця"
+    },
+    "衬衫": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "рубашка",
+      "uk": "сорочка"
+    },
+    "钥匙": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "ключ",
+      "uk": "ключ"
+    },
+    "钱包": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "кошелёк",
+      "uk": "гаманець"
+    },
+    "包": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "сумка",
+      "uk": "сумка"
+    },
+    "伞": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "зонт",
+      "uk": "парасолька"
+    },
+    "垃圾": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "мусор",
+      "uk": "сміття"
+    },
+    "镜子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "зеркало",
+      "uk": "дзеркало"
+    },
+    "照片": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "фотография",
+      "uk": "фотографія"
+    },
+    "楼梯": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "лестница",
+      "uk": "сходи"
+    },
+    "电梯": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "лифт",
+      "uk": "ліфт"
+    },
+    "阳台": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "балкон",
+      "uk": "балкон"
+    },
+    "柜子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "шкаф",
+      "uk": "шафа"
+    },
+    "床单": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "простыня",
+      "uk": "простирадло"
+    },
+    "洗发水": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "шампунь",
+      "uk": "шампунь"
+    },
+    "微波炉": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "микроволновка",
+      "uk": "мікрохвильовка"
+    },
+    "水壶": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "чайник",
+      "uk": "чайник"
+    },
+    "锅": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "кастрюля",
+      "uk": "каструля"
+    },
+    "盘子": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "тарелка",
+      "uk": "тарілка"
+    },
+    "垃圾桶": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "мусорное ведро",
+      "uk": "смітник"
+    },
+    "钟表": {
+      "source": "international_vocab",
+      "confidence": 0.95,
+      "ru": "часы",
+      "uk": "годинник"
+    }
   },
   "ru": {
     "entities": [
-      {"lemma": "Путин", "zh": "普京", "forms": ["Путина", "Путину", "Путиным", "Путине"]},
-      {"lemma": "Зеленский", "zh": "泽连斯基", "forms": ["Зеленского", "Зеленскому"]},
-      {"lemma": "Киев", "zh": "基辅", "forms": ["Киева", "Киеву", "Киеве"]},
-      {"lemma": "Харьков", "zh": "哈尔科夫"},
-      {"lemma": "Москва", "zh": "莫斯科"},
-      {"lemma": "Украина", "zh": "乌克兰"},
-      {"lemma": "Россия", "zh": "俄罗斯"},
-      {"lemma": "СБУ", "zh": "乌克兰安全局"},
-      {"lemma": "НАТО", "zh": "北约"},
-      {"lemma": "ООН", "zh": "联合国"},
-      {"lemma": "ЕС", "zh": "欧盟"},
-      {"lemma": "Александр", "zh": "亚历山大"},
-      {"lemma": "Владимир", "zh": "弗拉基米尔"},
-      {"lemma": "Дмитрий", "zh": "德米特里"},
-      {"lemma": "Сергей", "zh": "谢尔盖"},
-      {"lemma": "Николай", "zh": "尼古拉"},
-      {"lemma": "Михаил", "zh": "米哈伊尔"},
-      {"lemma": "Мария", "zh": "玛丽亚"}
+      {
+        "lemma": "Путин",
+        "zh": "普京",
+        "forms": [
+          "Путина",
+          "Путину",
+          "Путиным",
+          "Путине"
+        ]
+      },
+      {
+        "lemma": "Зеленский",
+        "zh": "泽连斯基",
+        "forms": [
+          "Зеленского",
+          "Зеленскому"
+        ]
+      },
+      {
+        "lemma": "Киев",
+        "zh": "基辅",
+        "forms": [
+          "Киева",
+          "Киеву",
+          "Киеве"
+        ]
+      },
+      {
+        "lemma": "Харьков",
+        "zh": "哈尔科夫"
+      },
+      {
+        "lemma": "Москва",
+        "zh": "莫斯科"
+      },
+      {
+        "lemma": "Украина",
+        "zh": "乌克兰"
+      },
+      {
+        "lemma": "Россия",
+        "zh": "俄罗斯"
+      },
+      {
+        "lemma": "СБУ",
+        "zh": "乌克兰安全局"
+      },
+      {
+        "lemma": "НАТО",
+        "zh": "北约"
+      },
+      {
+        "lemma": "ООН",
+        "zh": "联合国"
+      },
+      {
+        "lemma": "ЕС",
+        "zh": "欧盟"
+      },
+      {
+        "lemma": "Александр",
+        "zh": "亚历山大"
+      },
+      {
+        "lemma": "Владимир",
+        "zh": "弗拉基米尔"
+      },
+      {
+        "lemma": "Дмитрий",
+        "zh": "德米特里"
+      },
+      {
+        "lemma": "Сергей",
+        "zh": "谢尔盖"
+      },
+      {
+        "lemma": "Николай",
+        "zh": "尼古拉"
+      },
+      {
+        "lemma": "Михаил",
+        "zh": "米哈伊尔"
+      },
+      {
+        "lemma": "Мария",
+        "zh": "玛丽亚"
+      },
+      {
+        "lemma": "шторы",
+        "zh": "窗帘",
+        "forms": [
+          "штор",
+          "штора",
+          "штору",
+          "шторами",
+          "шторах"
+        ]
+      },
+      {
+        "lemma": "окно",
+        "zh": "窗户",
+        "forms": [
+          "окна",
+          "окном",
+          "окну",
+          "окне",
+          "окон"
+        ]
+      }
     ],
     "military": [
-      {"lemma": "бригада", "zh": "旅"},
-      {"lemma": "батальон", "zh": "营"},
-      {"lemma": "рота", "zh": "连"},
-      {"lemma": "дивизия", "zh": "师"},
-      {"lemma": "артиллерия", "zh": "炮兵"},
-      {"lemma": "БПЛА", "zh": "无人机"},
-      {"lemma": "танк", "zh": "坦克"},
-      {"lemma": "ракета", "zh": "导弹"},
-      {"lemma": "обстрел", "zh": "炮击"},
-      {"lemma": "наступление", "zh": "进攻"},
-      {"lemma": "фронт", "zh": "前线"},
-      {"lemma": "армия", "zh": "军队"},
-      {"lemma": "военный", "zh": "军事"},
-      {"lemma": "мобилизация", "zh": "动员"}
+      {
+        "lemma": "бригада",
+        "zh": "旅"
+      },
+      {
+        "lemma": "батальон",
+        "zh": "营"
+      },
+      {
+        "lemma": "рота",
+        "zh": "连"
+      },
+      {
+        "lemma": "дивизия",
+        "zh": "师"
+      },
+      {
+        "lemma": "артиллерия",
+        "zh": "炮兵"
+      },
+      {
+        "lemma": "БПЛА",
+        "zh": "无人机"
+      },
+      {
+        "lemma": "танк",
+        "zh": "坦克"
+      },
+      {
+        "lemma": "ракета",
+        "zh": "导弹"
+      },
+      {
+        "lemma": "обстрел",
+        "zh": "炮击"
+      },
+      {
+        "lemma": "наступление",
+        "zh": "进攻"
+      },
+      {
+        "lemma": "фронт",
+        "zh": "前线"
+      },
+      {
+        "lemma": "армия",
+        "zh": "军队"
+      },
+      {
+        "lemma": "военный",
+        "zh": "军事"
+      },
+      {
+        "lemma": "мобилизация",
+        "zh": "动员"
+      }
     ],
     "political": [
-      {"lemma": "санкции", "zh": "制裁", "usage_rank": 2},
-      {"lemma": "санкция", "zh": "制裁"},
-      {"lemma": "переговоры", "zh": "谈判", "usage_rank": 2},
-      {"lemma": "соглашение", "zh": "协议", "usage_rank": 2},
-      {"lemma": "президент", "zh": "总统"},
-      {"lemma": "правительство", "zh": "政府"},
-      {"lemma": "министр", "zh": "部长"},
-      {"lemma": "парламент", "zh": "议会"},
-      {"lemma": "дипломатия", "zh": "外交"},
-      {"lemma": "резолюция", "zh": "决议"},
-      {"lemma": "саммит", "zh": "峰会"},
-      {"lemma": "война", "zh": "战争"},
-      {"lemma": "перемирие", "zh": "停火"},
-      {"lemma": "референдум", "zh": "全民公投"}
+      {
+        "lemma": "санкции",
+        "zh": "制裁",
+        "usage_rank": 2
+      },
+      {
+        "lemma": "санкция",
+        "zh": "制裁"
+      },
+      {
+        "lemma": "переговоры",
+        "zh": "谈判",
+        "usage_rank": 2
+      },
+      {
+        "lemma": "соглашение",
+        "zh": "协议",
+        "usage_rank": 2
+      },
+      {
+        "lemma": "президент",
+        "zh": "总统"
+      },
+      {
+        "lemma": "правительство",
+        "zh": "政府"
+      },
+      {
+        "lemma": "министр",
+        "zh": "部长"
+      },
+      {
+        "lemma": "парламент",
+        "zh": "议会"
+      },
+      {
+        "lemma": "дипломатия",
+        "zh": "外交"
+      },
+      {
+        "lemma": "резолюция",
+        "zh": "决议"
+      },
+      {
+        "lemma": "саммит",
+        "zh": "峰会"
+      },
+      {
+        "lemma": "война",
+        "zh": "战争"
+      },
+      {
+        "lemma": "перемирие",
+        "zh": "停火"
+      },
+      {
+        "lemma": "референдум",
+        "zh": "全民公投"
+      }
+    ],
+    "daily": [
+      {
+        "lemma": "шторы",
+        "zh": "窗帘",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "окно",
+        "zh": "窗户",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "дверь",
+        "zh": "门",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "стена",
+        "zh": "墙",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "пол",
+        "zh": "地板",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "потолке",
+        "zh": "天花板",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "стол",
+        "zh": "桌子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "стул",
+        "zh": "椅子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "кровать",
+        "zh": "床",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "диван",
+        "zh": "沙发",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "книжная полка",
+        "zh": "书架",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "ящик",
+        "zh": "抽屉",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "подушка",
+        "zh": "枕头",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "одеяло",
+        "zh": "被子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "полотенце",
+        "zh": "毛巾",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "щётка",
+        "zh": "牙刷",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "зубную",
+        "zh": "牙膏",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "мыло",
+        "zh": "肥皂",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "кухня",
+        "zh": "厨房",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "спальня",
+        "zh": "卧室",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "туалет",
+        "zh": "卫生间",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "гостиная",
+        "zh": "客厅",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "столовая",
+        "zh": "餐厅",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "холодильник",
+        "zh": "冰箱",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "стиральная машина",
+        "zh": "洗衣机",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "кондиционер",
+        "zh": "空调",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "телевизор",
+        "zh": "电视",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "компьютер",
+        "zh": "电脑",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "телефон",
+        "zh": "手机",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "свет",
+        "zh": "灯",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "духовка",
+        "zh": "烤箱",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "посуду",
+        "zh": "碗",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "палочки для еды",
+        "zh": "筷子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "ложки",
+        "zh": "勺子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "нож",
+        "zh": "刀",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "вилка",
+        "zh": "叉",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "чашка",
+        "zh": "杯子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "одежда",
+        "zh": "衣服",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "брюки",
+        "zh": "裤子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "обувь",
+        "zh": "鞋子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "шляпу",
+        "zh": "帽子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "носки",
+        "zh": "袜子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "пальто",
+        "zh": "外套",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "юбка",
+        "zh": "裙子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "рубашку",
+        "zh": "衬衫",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "ключ",
+        "zh": "钥匙",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "кошелёк",
+        "zh": "钱包",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "сумка",
+        "zh": "包",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "зонт",
+        "zh": "伞",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "мусор",
+        "zh": "垃圾",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "зеркало",
+        "zh": "镜子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "фотография",
+        "zh": "照片",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "лестница",
+        "zh": "楼梯",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "лифт",
+        "zh": "电梯",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "балкон",
+        "zh": "阳台",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "шкаф",
+        "zh": "柜子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "одеяло",
+        "zh": "毯子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "простыня",
+        "zh": "床单",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "шампунь",
+        "zh": "洗发水",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "микроволновка",
+        "zh": "微波炉",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "чайник",
+        "zh": "水壶",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "кастрюля",
+        "zh": "锅",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "тарелка",
+        "zh": "盘子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "мусорное ведро",
+        "zh": "垃圾桶",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "часы",
+        "zh": "钟表",
+        "source": "international_vocab",
+        "confidence": 0.95
+      }
     ]
   },
   "uk": {
     "entities": [
-      {"lemma": "Зеленський", "zh": "泽连斯基", "forms": ["Зеленського", "Зеленському"]},
-      {"lemma": "Путін", "zh": "普京"},
-      {"lemma": "Київ", "zh": "基辅", "forms": ["Києва", "Києву", "Києві"]},
-      {"lemma": "Харків", "zh": "哈尔科夫"},
-      {"lemma": "Москва", "zh": "莫斯科"},
-      {"lemma": "Україна", "zh": "乌克兰"},
-      {"lemma": "Росія", "zh": "俄罗斯"},
-      {"lemma": "СБУ", "zh": "乌克兰安全局"},
-      {"lemma": "НАТО", "zh": "北约"},
-      {"lemma": "ООН", "zh": "联合国"},
-      {"lemma": "ЄС", "zh": "欧盟"},
-      {"lemma": "Олександр", "zh": "奥列克桑德尔"},
-      {"lemma": "Володимир", "zh": "沃洛德米尔"},
-      {"lemma": "Дмитро", "zh": "德米特罗"},
-      {"lemma": "Сергій", "zh": "谢尔希"},
-      {"lemma": "Микола", "zh": "米科拉"},
-      {"lemma": "Михайло", "zh": "米哈伊洛"},
-      {"lemma": "Марія", "zh": "玛丽娅"},
-      {"lemma": "Львів", "zh": "利沃夫"},
-      {"lemma": "Одеса", "zh": "敖德萨"},
-      {"lemma": "Донбас", "zh": "顿巴斯"}
+      {
+        "lemma": "Зеленський",
+        "zh": "泽连斯基",
+        "forms": [
+          "Зеленського",
+          "Зеленському"
+        ]
+      },
+      {
+        "lemma": "Путін",
+        "zh": "普京"
+      },
+      {
+        "lemma": "Київ",
+        "zh": "基辅",
+        "forms": [
+          "Києва",
+          "Києву",
+          "Києві"
+        ]
+      },
+      {
+        "lemma": "Харків",
+        "zh": "哈尔科夫"
+      },
+      {
+        "lemma": "Москва",
+        "zh": "莫斯科"
+      },
+      {
+        "lemma": "Україна",
+        "zh": "乌克兰"
+      },
+      {
+        "lemma": "Росія",
+        "zh": "俄罗斯"
+      },
+      {
+        "lemma": "СБУ",
+        "zh": "乌克兰安全局"
+      },
+      {
+        "lemma": "НАТО",
+        "zh": "北约"
+      },
+      {
+        "lemma": "ООН",
+        "zh": "联合国"
+      },
+      {
+        "lemma": "ЄС",
+        "zh": "欧盟"
+      },
+      {
+        "lemma": "Олександр",
+        "zh": "奥列克桑德尔"
+      },
+      {
+        "lemma": "Володимир",
+        "zh": "沃洛德米尔"
+      },
+      {
+        "lemma": "Дмитро",
+        "zh": "德米特罗"
+      },
+      {
+        "lemma": "Сергій",
+        "zh": "谢尔希"
+      },
+      {
+        "lemma": "Микола",
+        "zh": "米科拉"
+      },
+      {
+        "lemma": "Михайло",
+        "zh": "米哈伊洛"
+      },
+      {
+        "lemma": "Марія",
+        "zh": "玛丽娅"
+      },
+      {
+        "lemma": "Львів",
+        "zh": "利沃夫"
+      },
+      {
+        "lemma": "Одеса",
+        "zh": "敖德萨"
+      },
+      {
+        "lemma": "Донбас",
+        "zh": "顿巴斯"
+      },
+      {
+        "lemma": "штори",
+        "zh": "窗帘",
+        "forms": [
+          "штор",
+          "шторою",
+          "шторах"
+        ]
+      },
+      {
+        "lemma": "вікно",
+        "zh": "窗户",
+        "forms": [
+          "вікна",
+          "вікном",
+          "вікну",
+          "вікні",
+          "вікон"
+        ]
+      }
     ],
     "military": [
-      {"lemma": "бригада", "zh": "旅"},
-      {"lemma": "батальйон", "zh": "营"},
-      {"lemma": "рота", "zh": "连"},
-      {"lemma": "дивізія", "zh": "师"},
-      {"lemma": "артилерія", "zh": "炮兵"},
-      {"lemma": "БПЛА", "zh": "无人机"},
-      {"lemma": "танк", "zh": "坦克"},
-      {"lemma": "ракета", "zh": "导弹"},
-      {"lemma": "обстріл", "zh": "炮击"},
-      {"lemma": "наступ", "zh": "进攻"},
-      {"lemma": "фронт", "zh": "前线"},
-      {"lemma": "армія", "zh": "军队"},
-      {"lemma": "мобілізація", "zh": "动员"}
+      {
+        "lemma": "бригада",
+        "zh": "旅"
+      },
+      {
+        "lemma": "батальйон",
+        "zh": "营"
+      },
+      {
+        "lemma": "рота",
+        "zh": "连"
+      },
+      {
+        "lemma": "дивізія",
+        "zh": "师"
+      },
+      {
+        "lemma": "артилерія",
+        "zh": "炮兵"
+      },
+      {
+        "lemma": "БПЛА",
+        "zh": "无人机"
+      },
+      {
+        "lemma": "танк",
+        "zh": "坦克"
+      },
+      {
+        "lemma": "ракета",
+        "zh": "导弹"
+      },
+      {
+        "lemma": "обстріл",
+        "zh": "炮击"
+      },
+      {
+        "lemma": "наступ",
+        "zh": "进攻"
+      },
+      {
+        "lemma": "фронт",
+        "zh": "前线"
+      },
+      {
+        "lemma": "армія",
+        "zh": "军队"
+      },
+      {
+        "lemma": "мобілізація",
+        "zh": "动员"
+      }
     ],
     "political": [
-      {"lemma": "санкції", "zh": "制裁"},
-      {"lemma": "санкція", "zh": "制裁"},
-      {"lemma": "переговори", "zh": "谈判"},
-      {"lemma": "угода", "zh": "协议"},
-      {"lemma": "президент", "zh": "总统"},
-      {"lemma": "уряд", "zh": "政府"},
-      {"lemma": "міністр", "zh": "部长"},
-      {"lemma": "парламент", "zh": "议会"},
-      {"lemma": "дипломатія", "zh": "外交"},
-      {"lemma": "резолюція", "zh": "决议"},
-      {"lemma": "війна", "zh": "战争"},
-      {"lemma": "перемир'я", "zh": "停火"},
-      {"lemma": "референдум", "zh": "全民公投"},
-      {"lemma": "Верховна Рада", "zh": "最高拉达"}
+      {
+        "lemma": "санкції",
+        "zh": "制裁"
+      },
+      {
+        "lemma": "санкція",
+        "zh": "制裁"
+      },
+      {
+        "lemma": "переговори",
+        "zh": "谈判"
+      },
+      {
+        "lemma": "угода",
+        "zh": "协议"
+      },
+      {
+        "lemma": "президент",
+        "zh": "总统"
+      },
+      {
+        "lemma": "уряд",
+        "zh": "政府"
+      },
+      {
+        "lemma": "міністр",
+        "zh": "部长"
+      },
+      {
+        "lemma": "парламент",
+        "zh": "议会"
+      },
+      {
+        "lemma": "дипломатія",
+        "zh": "外交"
+      },
+      {
+        "lemma": "резолюція",
+        "zh": "决议"
+      },
+      {
+        "lemma": "війна",
+        "zh": "战争"
+      },
+      {
+        "lemma": "перемир'я",
+        "zh": "停火"
+      },
+      {
+        "lemma": "референдум",
+        "zh": "全民公投"
+      },
+      {
+        "lemma": "Верховна Рада",
+        "zh": "最高拉达"
+      }
+    ],
+    "daily": [
+      {
+        "lemma": "штори",
+        "zh": "窗帘",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "вікно",
+        "zh": "窗户",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "двері",
+        "zh": "门",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "стіна",
+        "zh": "墙",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "Він",
+        "zh": "地板",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "стелі",
+        "zh": "天花板",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "стіл",
+        "zh": "桌子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "стілець",
+        "zh": "椅子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "ліжко",
+        "zh": "床",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "диван",
+        "zh": "沙发",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "книжкова полиця",
+        "zh": "书架",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "ящик",
+        "zh": "抽屉",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "подушка",
+        "zh": "枕头",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "ковдра",
+        "zh": "被子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "рушник",
+        "zh": "毛巾",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "зубна",
+        "zh": "牙刷",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "мило",
+        "zh": "肥皂",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "кухня",
+        "zh": "厨房",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "спальня",
+        "zh": "卧室",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "туалет",
+        "zh": "卫生间",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "вітальня",
+        "zh": "客厅",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "їдальня",
+        "zh": "餐厅",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "холодильник",
+        "zh": "冰箱",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "пральна машина",
+        "zh": "洗衣机",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "кондиціонер",
+        "zh": "空调",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "телевізор",
+        "zh": "电视",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "комп'ютер",
+        "zh": "电脑",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "телефон",
+        "zh": "手机",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "світло",
+        "zh": "灯",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "посуд",
+        "zh": "碗",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "палички для їжі",
+        "zh": "筷子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "ніж",
+        "zh": "刀",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "виделка",
+        "zh": "叉",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "чашка",
+        "zh": "杯子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "одяг",
+        "zh": "衣服",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "штани",
+        "zh": "裤子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "взуття",
+        "zh": "鞋子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "капелюх",
+        "zh": "帽子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "шкарпетки",
+        "zh": "袜子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "пальто",
+        "zh": "外套",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "сукня",
+        "zh": "裙子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "сорочку",
+        "zh": "衬衫",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "ключ",
+        "zh": "钥匙",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "гаманець",
+        "zh": "钱包",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "сумка",
+        "zh": "包",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "парасолька",
+        "zh": "伞",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "Кинь",
+        "zh": "垃圾",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "дзеркало",
+        "zh": "镜子",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "фотографія",
+        "zh": "照片",
+        "source": "international_vocab",
+        "confidence": 0.98
+      },
+      {
+        "lemma": "сходи",
+        "zh": "楼梯",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "ліфт",
+        "zh": "电梯",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "балкон",
+        "zh": "阳台",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "шафа",
+        "zh": "柜子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "ковдра",
+        "zh": "毯子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "простирадло",
+        "zh": "床单",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "зубна паста",
+        "zh": "牙膏",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "шампунь",
+        "zh": "洗发水",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "мікрохвильовка",
+        "zh": "微波炉",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "духовка",
+        "zh": "烤箱",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "чайник",
+        "zh": "水壶",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "каструля",
+        "zh": "锅",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "тарілка",
+        "zh": "盘子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "ложка",
+        "zh": "勺子",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "смітник",
+        "zh": "垃圾桶",
+        "source": "international_vocab",
+        "confidence": 0.95
+      },
+      {
+        "lemma": "годинник",
+        "zh": "钟表",
+        "source": "international_vocab",
+        "confidence": 0.95
+      }
     ]
   }
 }

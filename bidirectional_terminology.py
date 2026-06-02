@@ -68,7 +68,7 @@ def _build_zh_to_slavic_candidates(
     data = _load_entities_and_terms()
     block = data.get(lang) or {}
     idx = 0
-    for category in ("entities", "places", "military", "political"):
+    for category in ("entities", "places", "military", "political", "daily"):
         for item in block.get(category) or []:
             if not isinstance(item, dict):
                 continue
@@ -198,6 +198,14 @@ def _wrong_forms_for_zh(zh: str, target_lang: str) -> list[str]:
     entry = _zh_name_entries().get(zh) or {}
     key = "wrong_ru" if lang == "ru" else "wrong_uk"
     wrong.extend(str(x).strip() for x in (entry.get(key) or []) if str(x).strip())
+    data = _load_entities_and_terms()
+    zh_cell = (data.get("zh_to") or {}).get(zh)
+    if isinstance(zh_cell, dict):
+        wrong.extend(
+            str(x).strip()
+            for x in (zh_cell.get(key) or [])
+            if str(x).strip()
+        )
     other = "uk" if lang == "ru" else "ru"
     other_lem = resolve_zh_to_slavic(zh, other)
     if other_lem and correct and other_lem != correct:

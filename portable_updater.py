@@ -81,6 +81,8 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "post_edit_uk.py",
     "data/collocations",
     "data/style",
+    "data/terminology",
+    "data/glossary/international",
     "terminology_registry.py",
     "requirements-corpus-rerank.txt",
     "language_catalog.py",
@@ -92,6 +94,20 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
 )
 
 PRESERVE_TOP_DIRS = frozenset({"data"})
+
+# 允许随更新包覆盖的 data/ 子路径（程序内置术语/搭配，不含用户术语库与缓存）
+_DATA_UPDATE_PREFIXES = (
+    "data/idioms",
+    "data/collocations",
+    "data/style",
+    "data/terminology",
+    "data/glossary/international",
+)
+
+
+def _data_path_updatable(rel: Path) -> bool:
+    s = rel.as_posix()
+    return any(s == p or s.startswith(f"{p}/") for p in _DATA_UPDATE_PREFIXES)
 
 
 def _skip_payload_rel(rel: Path) -> bool:
@@ -182,7 +198,8 @@ def collect_payload_files(payload_root: Path) -> list[Path]:
                 if f.is_file():
                     rel_path = f.relative_to(root)
                     if rel_path.parts and rel_path.parts[0] in PRESERVE_TOP_DIRS:
-                        continue
+                        if not _data_path_updatable(rel_path):
+                            continue
                     if _skip_payload_rel(rel_path):
                         continue
                     if rel_path not in seen:
@@ -230,7 +247,8 @@ def apply_update(
         if not src.is_file():
             continue
         if rel.parts and rel.parts[0] in PRESERVE_TOP_DIRS:
-            continue
+            if not _data_path_updatable(rel):
+                continue
         log(f"更新 {rel}")
         try:
             dst.parent.mkdir(parents=True, exist_ok=True)

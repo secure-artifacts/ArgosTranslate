@@ -53,7 +53,11 @@ def clear_terminology_cache() -> None:
 
 def load_extracted_glossaries() -> dict[str, list[dict[str, str]]]:
     out: dict[str, list[dict[str, str]]] = {"ru": [], "uk": []}
-    for base in (GLOSSARY_DIR, ROOT / "data" / "corpus" / "glossary_extracted"):
+    for base in (
+        GLOSSARY_DIR,
+        ROOT / "data" / "corpus" / "glossary_extracted",
+        ROOT / "data" / "glossary" / "international",
+    ):
         if not base.is_dir():
             continue
         for p in base.glob("*.json"):
@@ -84,6 +88,7 @@ def load_extracted_glossaries() -> dict[str, list[dict[str, str]]]:
                         "LOC": "places",
                         "ORG": "political",
                         "EVENT": "political",
+                        "daily": "daily",
                     }
                     out.setdefault(lang, []).append(
                         {
@@ -101,7 +106,7 @@ def _existing_maps(data: dict[str, Any], lang: str) -> dict[str, dict[str, Any]]
     """lemma.lower() -> {zh, category, locked}"""
     block = data.get(lang) or {}
     found: dict[str, dict[str, Any]] = {}
-    for cat in ("entities", "military", "political", "places"):
+    for cat in ("entities", "military", "political", "places", "daily"):
         for item in block.get(cat) or []:
             if not isinstance(item, dict):
                 continue
