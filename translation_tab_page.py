@@ -54,20 +54,8 @@ def _is_zh_family_code(code: str) -> bool:
 
 
 def _resolve_translation(input_language, output_language, languages: list):
-    """
-    选择翻译链。Ollama 模式下使用 Qwen 2.5；否则走 Argos 语言包。
-    中→乌在 Argos 模式下仍优先经俄语；Ollama 模式下可直译。
-    """
+    """选择 Argos 翻译链；中→乌优先经俄语复合链。"""
     if input_language is None or output_language is None:
-        return None
-    try:
-        import ollama_translate as ot
-
-        if ot.use_ollama_backend():
-            return ot.make_translation(input_language.code, output_language.code)
-    except ImportError:
-        pass
-    except ValueError:
         return None
     src = (input_language.code or "").strip().lower()
     tgt = (output_language.code or "").strip().lower()
@@ -187,29 +175,6 @@ class TranslationTabPage(QWidget):
         lang_bar.setObjectName("LangBar")
         lang_row = QHBoxLayout(lang_bar)
         lang_row.setContentsMargins(12, 8, 12, 8)
-        self._engine_combo = None
-        self._engine_help_btn = None
-        if root is not None and (root / "ollama_translate.py").is_file():
-            import translation_engine_ui as teu
-
-            from PyQt5.QtWidgets import QLabel
-
-            lang_row.addWidget(QLabel("引擎"))
-            self._engine_combo = QComboBox()
-            self._engine_combo.setObjectName("EngineCombo")
-            self._engine_combo.setMinimumWidth(118)
-            teu.populate_engine_combo(self._engine_combo)
-            self._engine_combo.currentIndexChanged.connect(
-                self._on_engine_combo_changed
-            )
-            lang_row.addWidget(self._engine_combo)
-            self._engine_help_btn = QPushButton("?")
-            self._engine_help_btn.setObjectName("TextAction")
-            self._engine_help_btn.setFixedWidth(28)
-            self._engine_help_btn.setToolTip("查看 Argos 与 Ollama 的优缺点")
-            self._engine_help_btn.clicked.connect(self._show_engine_help)
-            lang_row.addWidget(self._engine_help_btn)
-            lang_row.addSpacing(12)
         self.left_language_combo = QComboBox()
         self.language_swap_button = QPushButton("↔")
         self.right_language_combo = QComboBox()
@@ -226,13 +191,6 @@ class TranslationTabPage(QWidget):
             _src_ph = "在此输入要翻译的原文"
         else:
             _src_ph = "在此输入要翻译的原文（Ctrl+Shift+V 仅粘贴纯文本）"
-            if root is not None:
-                try:
-                    import ollama_translate as ot
-
-                    _src_ph = ot.engine_source_placeholder()
-                except ImportError:
-                    pass
         self.left_textEdit.setPlaceholderText(_src_ph)
         self._translate_debounce = QTimer(self)
         self._translate_debounce.setSingleShot(True)
@@ -246,13 +204,6 @@ class TranslationTabPage(QWidget):
             _tgt_ph = "译文"
         else:
             _tgt_ph = "译文将显示在此处"
-            if root is not None:
-                try:
-                    import ollama_translate as ot
-
-                    _tgt_ph = ot.engine_target_placeholder()
-                except ImportError:
-                    pass
         self.right_textEdit.setPlaceholderText(_tgt_ph)
         self.right_textEdit.textChanged.connect(self._update_char_counts)
 
@@ -556,22 +507,20 @@ class TranslationTabPage(QWidget):
         from_code: str,
         to_code: str,
         *,
-        use_llm: bool,
         tb,
         bm,
     ) -> str:
         t = text or ""
-        if not use_llm:
-            try:
-                import slavic_translation_enhance as ste
+        try:
+            import slavic_translation_enhance as ste
 
-                t = ste.prepare_argos_source(t, from_code, to_code)
-            except ImportError:
-                pass
+            t = ste.prepare_argos_source(t, from_code, to_code)
+        except ImportError:
+            pass
         if tb is not None and hasattr(tb, "prepare_engine_input"):
             return tb.prepare_engine_input(t)
         if bm is not None and hasattr(bm, "prepare_long_translation_input"):
-            return bm.prepare_long_translation_input(t, for_llm=use_llm)
+            return bm.prepare_long_translation_input(t, for_llm=False)
         return t
 
     def _apply_quality_guard(
@@ -582,12 +531,9 @@ class TranslationTabPage(QWidget):
         to_code: str,
         translation,
         *,
-        use_llm: bool,
         tb,
         bm,
     ) -> str:
-        if use_llm:
-            return result
         try:
             import argos_quality_guard as aqg
         except ImportError:
@@ -598,7 +544,6 @@ class TranslationTabPage(QWidget):
                 s,
                 from_code,
                 to_code,
-                use_llm=use_llm,
                 tb=tb,
                 bm=bm,
             )
@@ -653,36 +598,6 @@ class TranslationTabPage(QWidget):
                 _run()
 
         QThreadPool.globalInstance().start(_Job())
-
-    def refresh_engine_placeholders(self) -> None:
-        """切换 Argos / Ollama 后更新输入框说明。"""
-        try:
-            import ollama_translate as ot
-        except ImportError:
-            return
-        self.left_textEdit.setPlaceholderText(ot.engine_source_placeholder())
-        self.right_textEdit.setPlaceholderText(ot.engine_target_placeholder())
-
-    def _sync_engine_combo(self) -> None:
-        try:
-            import translation_engine_ui as teu
-        except ImportError:
-            return
-        teu.sync_engine_combo(self._engine_combo)
-
-    def _on_engine_combo_changed(self, index: int) -> None:
-        try:
-            import translation_engine_ui as teu
-        except ImportError:
-            return
-        teu.apply_engine_choice(index == 1, host=self._host)
-
-    def _show_engine_help(self) -> None:
-        try:
-            import translation_engine_ui as teu
-        except ImportError:
-            return
-        teu.show_engine_help(self)
 
     def _on_lang_combo_changed(self, _index: int = 0) -> None:
         sender = self.sender()
@@ -995,13 +910,6 @@ class TranslationTabPage(QWidget):
         self, translation, host: "GUIWindow | None"
     ) -> bool:
         """翻译路由尚未就绪，需要等待语言包或加载 CT2 模型。"""
-        try:
-            import ollama_translate as ot
-
-            if ot.use_ollama_backend():
-                return False
-        except ImportError:
-            pass
         if translation is not None:
             return False
         if host is None:
@@ -1052,21 +960,6 @@ class TranslationTabPage(QWidget):
         output_language,
     ):
         """必要时弹窗加载模型；返回 (input_language, output_language, translation)。"""
-        try:
-            import ollama_translate as ot
-
-            if ot.use_ollama_backend():
-                if input_language is None or output_language is None:
-                    return input_language, output_language, None
-                return (
-                    input_language,
-                    output_language,
-                    _resolve_translation(
-                        input_language, output_language, self.languages
-                    ),
-                )
-        except ImportError:
-            pass
         host = self._host
         translation = _resolve_translation(
             input_language, output_language, self.languages
@@ -1141,17 +1034,7 @@ class TranslationTabPage(QWidget):
             self.right_language_combo.currentIndex()
         )
         tb = _get_terminology_bridge()
-        try:
-            import ollama_translate as ot
-
-            use_llm = ot.use_ollama_backend()
-        except ImportError:
-            use_llm = False
-        if (
-            input_language is not None
-            and output_language is not None
-            and not use_llm
-        ):
+        if input_language is not None and output_language is not None:
             try:
                 import translation_memory as tm
 
@@ -1172,7 +1055,7 @@ class TranslationTabPage(QWidget):
         tq = _import_translation_quality_module()
         if tq is not None and hasattr(tq, "sanitize_source_text"):
             input_text_raw = tq.sanitize_source_text(
-                input_text_raw, for_llm=use_llm
+                input_text_raw, for_llm=False
             )
         zh_family = (
             tb.is_chinese_source_language(input_language.code)
@@ -1181,60 +1064,42 @@ class TranslationTabPage(QWidget):
         )
         tgt_code = (output_language.code or "").strip().lower()
         if zh_family:
-            if use_llm:
-                if tq is not None:
-                    input_text_raw = tq.normalize_zh_for_mt(input_text_raw)
-            else:
-                try:
-                    import slavic_translation_enhance as ste
+            try:
+                import slavic_translation_enhance as ste
 
-                    input_text_raw = ste.prepare_argos_source(
-                        input_text_raw,
-                        input_language.code,
-                        output_language.code,
-                    )
-                except ImportError:
-                    if tq is not None and tgt_code in ("ru", "uk") and hasattr(
-                        tq, "prepare_zh_for_cyrillic_target"
-                    ):
-                        input_text_raw = tq.prepare_zh_for_cyrillic_target(
-                            input_text_raw, tgt_code
-                        )
-                    elif tq is not None:
-                        input_text_raw = tq.normalize_zh_for_mt(input_text_raw)
-            bm = _import_bulk_text_module()
-            if bm is not None:
-                input_text_raw = bm.prepare_long_translation_input(
-                    input_text_raw, for_llm=use_llm
+                input_text_raw = ste.prepare_argos_source(
+                    input_text_raw,
+                    input_language.code,
+                    output_language.code,
                 )
-        elif use_llm:
+            except ImportError:
+                if tq is not None and tgt_code in ("ru", "uk") and hasattr(
+                    tq, "prepare_zh_for_cyrillic_target"
+                ):
+                    input_text_raw = tq.prepare_zh_for_cyrillic_target(
+                        input_text_raw, tgt_code
+                    )
+                elif tq is not None:
+                    input_text_raw = tq.normalize_zh_for_mt(input_text_raw)
             bm = _import_bulk_text_module()
             if bm is not None:
                 input_text_raw = bm.prepare_long_translation_input(
-                    input_text_raw, for_llm=True
+                    input_text_raw, for_llm=False
                 )
         input_language, output_language, translation = (
             self._ensure_translation_engine_ready(
                 input_language, output_language
             )
         )
-        if not use_llm:
-            try:
-                import slavic_translation_enhance as ste
+        try:
+            import slavic_translation_enhance as ste
 
-                ste.apply_argos_inference_tuning(
-                    input_text_raw,
-                    input_language.code,
-                    output_language.code,
-                )
-            except ImportError:
-                try:
-                    import argos_inference_tuning as ait
-
-                    ait.apply_for_input(input_text_raw)
-                except Exception:
-                    pass
-        else:
+            ste.apply_argos_inference_tuning(
+                input_text_raw,
+                input_language.code,
+                output_language.code,
+            )
+        except ImportError:
             try:
                 import argos_inference_tuning as ait
 
@@ -1242,17 +1107,6 @@ class TranslationTabPage(QWidget):
             except Exception:
                 pass
         if not translation:
-            try:
-                import ollama_translate as ot
-
-                if ot.use_ollama_backend():
-                    hint = ot.ollama_error_hint()
-                    hint += "\n\n请点击顶部「下载引擎」或菜单「下载翻译引擎…」完成安装。"
-                    self.update_right_textEdit(hint)
-                    error("Ollama 翻译引擎未就绪。")
-                    return
-            except ImportError:
-                pass
             lw = getattr(self._host, "_languages_lightweight", False)
             err = getattr(self._host, "_lang_load_full_error", "") or ""
             if lw:
@@ -1280,7 +1134,6 @@ class TranslationTabPage(QWidget):
                 input_language.code, output_language.code
             )
         )
-        progress_slot: list = []
         bm = _import_bulk_text_module()
         fc = input_language.code
         tc = output_language.code
@@ -1289,13 +1142,11 @@ class TranslationTabPage(QWidget):
         if use_glossary:
 
             def bound() -> str:
-                cb = progress_slot[0] if progress_slot else None
                 raw = tb.apply_glossary(
                     translation,
                     input_text_raw,
                     fc,
                     tc,
-                    on_progress=cb,
                 )
                 return self._apply_quality_guard(
                     raw,
@@ -1303,44 +1154,31 @@ class TranslationTabPage(QWidget):
                     fc,
                     tc,
                     translation,
-                    use_llm=use_llm,
                     tb=tb,
                     bm=bm,
                 )
 
         else:
             prep = self._prepare_argos_translate_input(
-                input_text_raw, fc, tc, use_llm=use_llm, tb=tb, bm=bm
+                input_text_raw, fc, tc, tb=tb, bm=bm
             )
-            if use_llm:
 
-                def bound() -> str:
-                    cb = progress_slot[0] if progress_slot else None
-                    if cb is not None:
-                        return translation.translate(prep, on_progress=cb)
-                    return translation.translate(prep)
-
-            else:
-
-                def bound() -> str:
-                    raw = translation.translate(prep)
-                    return self._apply_quality_guard(
-                        raw,
-                        source_snapshot,
-                        fc,
-                        tc,
-                        translation,
-                        use_llm=False,
-                        tb=tb,
-                        bm=bm,
-                    )
+            def bound() -> str:
+                raw = translation.translate(prep)
+                return self._apply_quality_guard(
+                    raw,
+                    source_snapshot,
+                    fc,
+                    tc,
+                    translation,
+                    tb=tb,
+                    bm=bm,
+                )
 
         self._translate_seq += 1
         seq = self._translate_seq
         self._show_translating_status("正在翻译…")
         new_worker = TranslationThread(bound, True)
-        if use_llm:
-            progress_slot.append(new_worker.send_text_update.emit)
 
         def _on_translate_update(text: str, _seq: int = seq) -> None:
             if _seq != self._translate_seq:
@@ -1370,15 +1208,6 @@ class TranslationTabPage(QWidget):
             return
         t = text or ""
         tq = _import_translation_quality_module()
-        try:
-            import ollama_translate as ot
-
-            if ot.use_ollama_backend() and tq is not None and hasattr(
-                tq, "sanitize_llm_translation_output"
-            ):
-                t = tq.sanitize_llm_translation_output(t)
-        except ImportError:
-            pass
         if tq is not None:
             R = self._language_at_combo_index(self.right_language_combo.currentIndex())
             L = self._language_at_combo_index(self.left_language_combo.currentIndex())
@@ -1405,37 +1234,24 @@ class TranslationTabPage(QWidget):
                         pass
                 if code in ("ru", "uk"):
                     try:
-                        import ollama_translate as ot
+                        import slavic_translation_enhance as ste
 
-                        use_llm_out = ot.use_ollama_backend()
+                        t = ste.postprocess_argos_target(
+                            t,
+                            src_code,
+                            code,
+                            source_text=src_plain,
+                        )
                     except ImportError:
-                        use_llm_out = False
-                    if not use_llm_out:
-                        try:
-                            import slavic_translation_enhance as ste
-
-                            t = ste.postprocess_argos_target(
+                        if hasattr(tq, "postprocess_translation_target"):
+                            t = tq.postprocess_translation_target(
                                 t,
-                                src_code,
                                 code,
                                 source_text=src_plain,
+                                source_lang_code=src_code,
                             )
-                        except ImportError:
-                            if hasattr(tq, "postprocess_translation_target"):
-                                t = tq.postprocess_translation_target(
-                                    t,
-                                    code,
-                                    source_text=src_plain,
-                                    source_lang_code=src_code,
-                                )
-                            else:
-                                t = tq.touchup_cyrillic_target_spacing(t)
-                    elif hasattr(tq, "postprocess_translation_target"):
-                        t = tq.postprocess_translation_target(
-                            t, code, source_text=src_plain, source_lang_code=src_code
-                        )
-                    else:
-                        t = tq.touchup_cyrillic_target_spacing(t)
+                        elif hasattr(tq, "touchup_cyrillic_target_spacing"):
+                            t = tq.touchup_cyrillic_target_spacing(t)
         self.right_textEdit.setPlainText(t)
         self._update_char_counts()
         self._maybe_show_uk_morph_install_notice()

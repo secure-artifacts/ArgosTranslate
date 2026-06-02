@@ -128,15 +128,3 @@ def postprocess_slavic_to_zh(
     return t.strip() if t else t
 
 
-def ollama_slavic_to_zh_system_appendix() -> str:
-    """Ollama 俄/乌→中补充说明（与内置术语库一致）。"""
-    return (
-        "Russian/Ukrainian→Chinese: Use international news Chinese (UN/EU style), "
-        "not mainland machine-translation phrasing. "
-        "NEVER confuse Ukrainian and Russian proper names "
-        "(Олександр→奥列克桑德尔, Александр→亚历山大; "
-        "Зеленський/Путін vs Зеленский/Путин). "
-        "Military terms: бригада→旅, батальон/батальйон→营, БПЛА→无人机. "
-        "Split long sentences; natural Chinese word order; no word-for-word calques. "
-        "Output only final Chinese, no notes or pinyin."
-    )

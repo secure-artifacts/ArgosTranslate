@@ -64,13 +64,6 @@ class Language:
 
 def load_languages_lightweight(portable_root: Path) -> list[Language]:
     """返回语言列表（无翻译路由，仅用于 UI 选语言）。"""
-    try:
-        import ollama_translate as ot
-
-        if ot.use_ollama_backend():
-            return ot.load_languages()
-    except ImportError:
-        pass
     by_code: dict[str, Language] = {}
     for pkg_root in _packages_dirs(portable_root):
         for row in _iter_translate_metadata(pkg_root):

@@ -59,7 +59,6 @@ from PyQt5.QtWidgets import *
 
 _terminology_bridge_mod = None
 _glossary_editor_mod = None
-_ollama_setup_dialog_mod = None
 _word_info_mod = None
 _offline_speech_mod = None
 _app_version_mod = None
@@ -381,27 +380,6 @@ def _import_glossary_editor_module():
     return mod
 
 
-def _import_ollama_setup_dialog_module():
-    global _ollama_setup_dialog_mod
-    if _ollama_setup_dialog_mod is False:
-        return None
-    if _ollama_setup_dialog_mod is not None:
-        return _ollama_setup_dialog_mod
-    root = _portable_bundle_root()
-    if root is None:
-        _ollama_setup_dialog_mod = False
-        return None
-    path = root / "ollama_setup_dialog.py"
-    if not path.is_file():
-        _ollama_setup_dialog_mod = False
-        return None
-    spec = importlib.util.spec_from_file_location("ollama_setup_dialog", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    _ollama_setup_dialog_mod = mod
-    return mod
-
-
 def _import_word_info_module():
     global _word_info_mod
     if _word_info_mod is False:
@@ -618,16 +596,6 @@ class LanguageLoadWorker(QThread):
         root = _portable_bundle_root()
         if root is not None and str(root) not in sys.path:
             sys.path.insert(0, str(root))
-        try:
-            import ollama_translate as ot
-
-            if ot.use_ollama_backend():
-                langs = ot.load_languages()
-                if langs:
-                    self.finished_ok.emit(langs, True)
-                    return
-        except Exception:
-            pass
         full_err = ""
         if root is not None:
             _prepare_native_dll(root)
@@ -1121,12 +1089,6 @@ class GUIWindow(QMainWindow):
         self.history_action.triggered.connect(self.translation_history_action_triggered)
         self.notebook_action = self.menu.addAction("生词本…")
         self.notebook_action.triggered.connect(self.word_notebook_action_triggered)
-        self.ollama_setup_action = self.menu.addAction("下载翻译引擎…")
-        self.ollama_setup_action.triggered.connect(
-            self.ollama_setup_action_triggered
-        )
-        self.engine_help_action = self.menu.addAction("翻译引擎说明…")
-        self.engine_help_action.triggered.connect(self.engine_help_action_triggered)
         self.install_location_action = self.menu.addAction("安装位置…")
         self.install_location_action.triggered.connect(
             self.install_location_action_triggered
@@ -1166,38 +1128,6 @@ class GUIWindow(QMainWindow):
             self._chrome_gloss_btn.setObjectName("ChromeBtn")
             self._chrome_gloss_btn.setText("术语库")
             self._chrome_gloss_btn.clicked.connect(self.glossary_action_triggered)
-            self._chrome_engine_combo = None
-            if (self._portable_root / "ollama_translate.py").is_file():
-                from PyQt5.QtWidgets import QComboBox
-
-                self._chrome_engine_combo = QComboBox()
-                self._chrome_engine_combo.setObjectName("ChromeEngineCombo")
-                try:
-                    import translation_engine_ui as teu
-
-                    _eng_tip = teu.ENGINE_COMBO_TOOLTIP
-                except ImportError:
-                    _eng_tip = (
-                        "Argos 强化（默认）；Ollama 精译（慢，可选）。点「?」查看说明。"
-                    )
-                self._chrome_engine_combo.setToolTip(_eng_tip)
-                self._chrome_engine_combo.addItem("Argos 强化", "argos")
-                self._chrome_engine_combo.addItem("Ollama 精", "ollama")
-                self._chrome_engine_combo.currentIndexChanged.connect(
-                    self._on_translation_engine_combo_changed
-                )
-                self._sync_translation_engine_combo()
-            self._chrome_engine_btn = None
-            if (self._portable_root / "ollama_setup_dialog.py").is_file():
-                self._chrome_engine_btn = QToolButton()
-                self._chrome_engine_btn.setObjectName("ChromeBtn")
-                self._chrome_engine_btn.setText("下载引擎")
-                self._chrome_engine_btn.setToolTip(
-                    "下载 Ollama 与 Qwen 翻译模型（100% 本地）"
-                )
-                self._chrome_engine_btn.clicked.connect(
-                    self.ollama_setup_action_triggered
-                )
             self._chrome_hist_btn = None
             if (self._portable_root / "translation_history.py").is_file():
                 self._chrome_hist_btn = QToolButton()
@@ -1235,10 +1165,6 @@ class GUIWindow(QMainWindow):
             self._chrome_dark_btn.clicked.connect(self._toggle_dark_mode)
             ch_l.addWidget(self._chrome_pkg_btn)
             ch_l.addWidget(self._chrome_gloss_btn)
-            if self._chrome_engine_combo is not None:
-                ch_l.addWidget(self._chrome_engine_combo)
-            if self._chrome_engine_btn is not None:
-                ch_l.addWidget(self._chrome_engine_btn)
             if self._chrome_hist_btn is not None:
                 ch_l.addWidget(self._chrome_hist_btn)
             if self._chrome_notebook_btn is not None:
@@ -1310,11 +1236,9 @@ class GUIWindow(QMainWindow):
 
         if self._portable_root is not None and _fast_startup_enabled():
             QTimer.singleShot(0, self._start_language_load_async)
-            QTimer.singleShot(800, self.maybe_setup_ollama_on_startup)
             QTimer.singleShot(2500, self.maybe_open_glossary_on_startup)
         else:
             self.load_languages()
-            QTimer.singleShot(800, self.maybe_setup_ollama_on_startup)
             QTimer.singleShot(0, self.maybe_open_glossary_on_startup)
 
         app = QApplication.instance()
@@ -1610,34 +1534,6 @@ class GUIWindow(QMainWindow):
         if mod.load_open_on_startup():
             self.open_glossary_editor()
 
-    def maybe_setup_ollama_on_startup(self):
-        mod = _import_ollama_setup_dialog_module()
-        if mod is None:
-            return
-        mod.maybe_show_setup_dialog(self, portable_root=self._portable_root)
-
-    def ollama_setup_action_triggered(self):
-        mod = _import_ollama_setup_dialog_module()
-        if mod is None:
-            QMessageBox.warning(
-                self, "下载翻译引擎", "未找到 ollama_setup_dialog.py。"
-            )
-            return
-        mod.open_setup_dialog(self, portable_root=self._portable_root)
-
-    def engine_help_action_triggered(self):
-        try:
-            import translation_engine_ui as teu
-        except ImportError:
-            QMessageBox.information(
-                self,
-                "翻译引擎",
-                "Argos 强化：默认主引擎（快，中→俄/乌已优化）。\n"
-                "Ollama：可选精译（慢，需下载引擎）。",
-            )
-            return
-        teu.show_engine_help(self)
-
     def install_location_action_triggered(self):
         try:
             import install_location_dialog as ild
@@ -1653,20 +1549,6 @@ class GUIWindow(QMainWindow):
             QMessageBox.warning(self, "检查更新", "未找到 update_dialog.py。")
             return
         ud.open_update_dialog(self)
-
-    def _sync_translation_engine_combo(self) -> None:
-        try:
-            import translation_engine_ui as teu
-        except ImportError:
-            return
-        teu.sync_engine_combo(getattr(self, "_chrome_engine_combo", None))
-
-    def _on_translation_engine_combo_changed(self, index: int) -> None:
-        try:
-            import translation_engine_ui as teu
-        except ImportError:
-            return
-        teu.apply_engine_choice(index == 1, host=self)
 
     def open_glossary_editor(self):
         mod = _import_glossary_editor_module()
@@ -1888,11 +1770,7 @@ class GUIWindow(QMainWindow):
             if lightweight:
                 tab.right_textEdit.setPlaceholderText(placeholder)
             else:
-                refresh_ph = getattr(tab, "refresh_engine_placeholders", None)
-                if callable(refresh_ph):
-                    refresh_ph()
-                else:
-                    tab.right_textEdit.setPlaceholderText(placeholder)
+                tab.right_textEdit.setPlaceholderText(placeholder)
             tab.apply_language_combos(run_translate=False)
         QTimer.singleShot(150, self._finish_restoring_session)
         if lightweight and full_error and _is_torch_dll_init_error(full_error):
@@ -1915,13 +1793,6 @@ class GUIWindow(QMainWindow):
         root = self._portable_root
         if root is not None and str(root) not in sys.path:
             sys.path.insert(0, str(root))
-        try:
-            import ollama_translate as ot
-
-            if ot.use_ollama_backend():
-                return bool(self.languages)
-        except ImportError:
-            pass
         if not self._languages_lightweight:
             return bool(self.languages)
         root = self._portable_root

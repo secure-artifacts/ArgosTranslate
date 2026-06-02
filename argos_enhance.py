@@ -1,5 +1,5 @@
 """
-Argos 强化栈（本软件主翻译路径，默认开启）。
+Argos 强化栈（本软件唯一翻译路径，默认开启）。
 
 组件：
   · argos_cpu_tuning      — 多核 CT2 并行
@@ -10,8 +10,6 @@ Argos 强化栈（本软件主翻译路径，默认开启）。
   · terminology_registry + slavic_to_zh_enhance — 俄/乌→中：专名/军政术语、分轨译名、新闻体中文
   · bidirectional_terminology + zh_to_slavic_enhance — 中→俄/乌：双向术语、外交句式、禁跨轨混用
   · corpus_pipeline + translation_memory — 四向 TM（ru/uk↔zh）、语料采集
-
-Ollama 为可选「精译」备用，不参与日常路径。
 """
 from __future__ import annotations
 
@@ -20,7 +18,6 @@ import os
 
 def bootstrap_on_startup() -> None:
     """进程启动时调用一次。"""
-    os.environ.setdefault("ARGOS_USE_OLLAMA", "0")
     os.environ.setdefault("ARGOS_SLAVIC_ENHANCE", "1")
     os.environ.setdefault("ARGOS_FAST_STARTUP", "1")
     try:
@@ -32,9 +29,4 @@ def bootstrap_on_startup() -> None:
 
 
 def is_primary_backend() -> bool:
-    try:
-        import ollama_translate as ot
-
-        return not ot.use_ollama_backend()
-    except ImportError:
-        return True
+    return True

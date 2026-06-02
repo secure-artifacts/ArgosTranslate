@@ -4,7 +4,6 @@
 兼容术语占位符：半角 GLOSSA####、全角 ＧＬＯＳＳＡ####、或西里尔误译 ГЛОССА####（不会在标记中间切断）。
 
 Argos：按句合并为较长「段」（每段约数百字），避免逐短句翻译丢失上下文。
-Ollama：更大块、少换行，由 ollama_translate 二次按段落/长度分块。
 """
 from __future__ import annotations
 
@@ -19,7 +18,6 @@ DEFAULT_MAX_RUN = 9000
 # Argos + 中文：按句合并段长（更大段→更少 CT2 次推理；段内仍保留句界上下文）
 CJK_MT_MAX_RUN = 1280
 CJK_SPLIT_WHEN_LINE_GE = 600
-# Ollama：尽量整段送入，由 LLM 侧再分块
 LLM_CJK_MAX_RUN = 3200
 LLM_SPLIT_WHEN_LINE_GE = 1400
 

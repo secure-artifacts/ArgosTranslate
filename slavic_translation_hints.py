@@ -1,5 +1,5 @@
 """
-中↔俄/乌翻译强化说明（Ollama 提示词与 Argos 后处理共用数据源）。
+中↔俄/乌翻译强化说明（Argos 后处理与术语数据）。
 """
 from __future__ import annotations
 
@@ -12,47 +12,6 @@ def is_zh_to_slavic(from_code: str, to_code: str) -> bool:
 
 def is_slavic_target(lang_code: str) -> bool:
     return (lang_code or "").strip().lower() in ("ru", "uk")
-
-
-def ollama_pair_hints(from_code: str, to_code: str) -> str:
-    """供 Ollama/Qwen 使用的语言对补充说明。"""
-    if is_zh_to_slavic(from_code, to_code):
-        try:
-            import zh_to_slavic_enhance as zts
-
-            track_hint = zts.ollama_zh_to_slavic_system_appendix(to_code)
-        except ImportError:
-            track_hint = chinese_to_slavic_hint()
-        return "\n".join(
-            (
-                track_hint,
-                religious_register_hint(),
-                translation_priority_hint(),
-            )
-        )
-    tgt = (to_code or "").strip().lower()
-    src = (from_code or "").strip().lower()
-    if tgt in ("zh", "zt", "cn") and src in ("ru", "uk"):
-        try:
-            import slavic_to_zh_enhance as stz
-
-            return stz.ollama_slavic_to_zh_system_appendix()
-        except ImportError:
-            return (
-                "Russian/Ukrainian→Chinese: international news style; "
-                "distinguish uk vs ru proper names; no word-for-word calques."
-            )
-    if tgt in ("zh", "zt") and src in ("ru", "uk", "en", "fr", "de", "es"):
-        return (
-            "When the source uses culture-specific idioms or figurative speech, "
-            "render the pragmatic meaning in natural Simplified Chinese."
-        )
-    if src == "en" or tgt == "en":
-        return (
-            "English phrasal verbs, idioms, and figurative compounds require "
-            "sense-based translation, not literal decomposition."
-        )
-    return ""
 
 
 def chinese_to_slavic_hint() -> str:

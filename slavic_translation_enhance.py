@@ -1,6 +1,6 @@
 """
-Argos 主路径强化：源语整理 + 分档推理 + 俄/乌后处理（与 Ollama 共用搭配数据）。
-默认开启（ARGOS_SLAVIC_ENHANCE=0 可关闭）。日常翻译应走本模块，不必切 Ollama。
+Argos 主路径强化：源语整理 + 分档推理 + 俄/乌后处理。
+默认开启（ARGOS_SLAVIC_ENHANCE=0 可关闭）。
 """
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ def postprocess_argos_target(
 ) -> str:
     """
     Argos 译文后处理（宗教搭配、成语 calque、变格、高级形态、文体冻结）。
-    与 Ollama 路径共用 translation_quality.postprocess_translation_target。
+    与 translation_quality.postprocess_translation_target 配合完成俄/乌后处理。
     """
     if not text:
         return text

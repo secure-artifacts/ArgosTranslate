@@ -47,7 +47,6 @@ def _apply_portable_env(root: Path) -> dict[str, str]:
     env.setdefault("CUDA_VISIBLE_DEVICES", "")
     env.setdefault("CTRANSLATE2_LOG_LEVEL", "ERROR")
     env.setdefault("ARGOS_DEVICE_TYPE", "cpu")
-    env.setdefault("OLLAMA_MODEL", "qwen2.5:7b")
     env.setdefault("OMP_NUM_THREADS", "1")
     if sys.platform == "win32":
         dll_dirs = [
