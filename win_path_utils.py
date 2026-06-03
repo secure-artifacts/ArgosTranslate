@@ -1,7 +1,10 @@
 """Windows 中文/非 ASCII 安装路径支持。"""
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -30,29 +33,18 @@ def path_has_non_ascii(path: Path | str) -> bool:
         return True
 
 
-def extended_path_str(path: Path | str) -> str:
-    """Windows 长路径/Unicode 前缀，便于子进程打开中文路径。"""
-    p = Path(path).resolve()
-    s = str(p)
-    if sys.platform != "win32":
-        return s
-    if s.startswith("\\\\?\\"):
-        return s
-    if s.startswith("\\\\"):
-        return "\\\\?\\UNC\\" + s[2:]
-    return "\\\\?\\" + s
-
-
-def subprocess_path(path: Path | str) -> str:
-    """传给 subprocess 参数列表的路径字符串。"""
-    return extended_path_str(path) if sys.platform == "win32" else str(path)
+def app_data_argos_dir() -> Path:
+    local = (os.environ.get("LOCALAPPDATA") or "").strip()
+    base = Path(local) if local else Path(tempfile.gettempdir())
+    d = base / "ArgosTranslate"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def embed_toolchain_dir(install_root: Path) -> Path:
     """
     嵌入式 Python / pip / virtualenv 的工作目录。
-    安装路径含中文时，放在 %LOCALAPPDATA%\\ArgosTranslate\\embed-toolchain，
-    避免 embed 版 python.exe 无法从自身中文路径加载模块。
+    安装路径含中文时，放在 %LOCALAPPDATA%\\ArgosTranslate\\embed-toolchain。
     """
     install_root = install_root.resolve()
     if not path_has_non_ascii(install_root):
@@ -60,9 +52,7 @@ def embed_toolchain_dir(install_root: Path) -> Path:
         embed.mkdir(parents=True, exist_ok=True)
         return embed
 
-    local = (os.environ.get("LOCALAPPDATA") or "").strip()
-    base = Path(local) if local else Path(tempfile.gettempdir())
-    cache = base / "ArgosTranslate" / "embed-toolchain"
+    cache = app_data_argos_dir() / "embed-toolchain"
     cache.mkdir(parents=True, exist_ok=True)
     marker = cache / "install_root.txt"
     try:
@@ -72,3 +62,74 @@ def embed_toolchain_dir(install_root: Path) -> Path:
     embed = cache / "embed"
     embed.mkdir(parents=True, exist_ok=True)
     return embed
+
+
+def venv_storage_dir(install_root: Path) -> Path:
+    """
+    虚拟环境实际目录。
+    中文安装路径时放在 %LOCALAPPDATA%\\ArgosTranslate\\venvs\\<hash>，
+    避免 virtualenv 在 Unicode 路径下复制 pip 失败。
+    """
+    install_root = install_root.resolve()
+    if not path_has_non_ascii(install_root):
+        return install_root / "venv"
+
+    key = hashlib.sha256(str(install_root).encode("utf-8")).hexdigest()[:16]
+    store = app_data_argos_dir() / "venvs" / key
+    store.mkdir(parents=True, exist_ok=True)
+    marker = store / "install_root.txt"
+    try:
+        marker.write_text(str(install_root), encoding="utf-8")
+    except OSError:
+        pass
+    return store
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
+
+
+def ensure_venv_junction(install_root: Path, real_venv: Path) -> None:
+    """在安装目录创建 venv 目录联接，指向实际 venv（中文路径必需）。"""
+    install_root = install_root.resolve()
+    real_venv = real_venv.resolve()
+    link = install_root / "venv"
+    if _same_path(link, real_venv):
+        return
+    if link.exists() or link.is_symlink():
+        if link.is_dir() and _same_path(link, real_venv):
+            return
+        if link.is_dir() and not link.is_symlink():
+            shutil.rmtree(link, ignore_errors=True)
+        else:
+            try:
+                link.unlink()
+            except OSError:
+                shutil.rmtree(link, ignore_errors=True)
+    real_venv.mkdir(parents=True, exist_ok=True)
+    if sys.platform != "win32":
+        link.symlink_to(real_venv, target_is_directory=True)
+        return
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    r = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(real_venv)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=flags,
+    )
+    if r.returncode != 0:
+        tail = (r.stderr or r.stdout or "").strip()
+        raise RuntimeError(
+            "无法在安装目录创建 venv 联接。\n"
+            f"{link}\n→ {real_venv}\n{tail}"
+        )
+
+
+def subprocess_path(path: Path | str) -> str:
+    """传给 subprocess 的路径（普通 Unicode 字符串，不用 \\\\?\\ 前缀）。"""
+    return str(Path(path).resolve())

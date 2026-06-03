@@ -20,7 +20,9 @@ from portable_updater import UPDATE_REL_PATHS
 from win_path_utils import (
     configure_windows_utf8,
     embed_toolchain_dir,
+    ensure_venv_junction,
     subprocess_path,
+    venv_storage_dir,
 )
 
 configure_windows_utf8()
@@ -119,7 +121,7 @@ def _run(
     env: dict[str, str] | None = None,
 ) -> None:
     merged = _subprocess_env(env)
-    run_cwd = subprocess_path(cwd) if cwd else None
+    run_cwd = str(cwd.resolve()) if cwd else None
     r = subprocess.run(
         cmd,
         cwd=run_cwd,
@@ -225,8 +227,8 @@ def _install_pip_into_embed(py: Path, embed_dir: Path, cb: ProgressCb | None) ->
     _enable_embed_site(embed_dir)
     get_pip = _ensure_get_pip_script(embed_dir.parent / "get-pip.py", cb)
     _emit(cb, 2, 0.72, "正在配置 pip…")
-    py_arg = subprocess_path(py)
-    get_pip_arg = subprocess_path(get_pip)
+    py_arg = str(py)
+    get_pip_arg = str(get_pip)
     _run(
         [py_arg, get_pip_arg, "--no-warn-script-location"],
         cwd=embed_dir,
@@ -240,9 +242,7 @@ def _install_pip_into_embed(py: Path, embed_dir: Path, cb: ProgressCb | None) ->
     if not _python_can_import(py, "pip", cwd=embed_dir):
         raise RuntimeError(
             "便携 Python 未能启用 pip。\n"
-            "请删除安装目录下的 _bootstrap 文件夹后重试；"
-            "若安装路径含中文，也可删除 "
-            "%LOCALAPPDATA%\\ArgosTranslate\\embed-toolchain 后重装。"
+            "请删除 %LOCALAPPDATA%\\ArgosTranslate\\embed-toolchain 后重试。"
         )
 
 
@@ -260,34 +260,38 @@ def _bootstrap_embed_python(embed_dir: Path, cb: ProgressCb | None) -> Path:
 
 
 def _create_venv(install_root: Path, cb: ProgressCb | None) -> Path:
-    venv = install_root / "venv"
-    if (venv / "Scripts" / "python.exe").is_file():
+    install_root = install_root.resolve()
+    real_venv = venv_storage_dir(install_root)
+    py_exe = real_venv / "Scripts" / "python.exe"
+    if py_exe.is_file():
+        ensure_venv_junction(install_root, real_venv)
         _emit(cb, 2, 1.0, "虚拟环境已存在，跳过创建。")
-        return venv / "Scripts" / "python.exe"
+        return py_exe
 
+    venv_arg = str(real_venv)
     _emit(cb, 2, 0.05, "正在检测本机 Python…")
     launcher = _find_python_launcher()
-    venv_arg = subprocess_path(venv)
     if launcher:
         _emit(cb, 2, 0.35, "正在用本机 Python 创建虚拟环境…")
         _run([*launcher, "-m", "venv", venv_arg], cwd=install_root)
+        ensure_venv_junction(install_root, real_venv)
         _emit(cb, 2, 1.0, "虚拟环境创建完成。")
-        return venv / "Scripts" / "python.exe"
+        return real_venv / "Scripts" / "python.exe"
 
     _emit(cb, 2, 0.1, "本机未检测到 Python，正在下载便携运行环境（约 25MB）…")
     embed = embed_toolchain_dir(install_root)
     py = _bootstrap_embed_python(embed, cb)
-    py_arg = subprocess_path(py)
-    get_pip_arg = subprocess_path(embed.parent / "get-pip.py")
+    py_arg = str(py)
     _emit(cb, 2, 0.78, "正在安装 virtualenv…")
     _run(
         [py_arg, "-m", "pip", "install", "virtualenv", "--no-warn-script-location"],
         cwd=embed,
     )
     _emit(cb, 2, 0.9, "正在创建虚拟环境…")
-    _run([py_arg, "-m", "virtualenv", venv_arg], cwd=install_root)
+    _run([py_arg, "-m", "virtualenv", venv_arg], cwd=embed.parent)
+    ensure_venv_junction(install_root, real_venv)
     _emit(cb, 2, 1.0, "虚拟环境创建完成。")
-    return venv / "Scripts" / "python.exe"
+    return real_venv / "Scripts" / "python.exe"
 
 
 def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
@@ -354,15 +358,15 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
     )
     proc = subprocess.Popen(
         [
-            subprocess_path(py),
+            str(py),
             "-m",
             "pip",
             "install",
             "-r",
-            subprocess_path(req),
+            str(req),
             "--no-warn-script-location",
         ],
-        cwd=subprocess_path(install_root),
+        cwd=str(install_root),
         env=_subprocess_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -404,7 +408,7 @@ def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> Non
     tool = install_root / "tools" / "apply_portable_gui_patch.py"
     if tool.is_file():
         _run(
-            [subprocess_path(py), subprocess_path(tool)],
+            [str(py), str(tool)],
             cwd=install_root,
         )
         _emit(cb, 4, 1.0, "界面补丁已应用。")
@@ -444,8 +448,8 @@ def launch_app(install_root: Path) -> int:
     env["XDG_CACHE_HOME"] = str(install_root / "data" / "cache")
     flags = getattr(subprocess, "DETACHED_PROCESS", 0x8) if sys.platform == "win32" else 0
     subprocess.Popen(
-        [subprocess_path(pyw), subprocess_path(script)],
-        cwd=subprocess_path(install_root),
+        [str(pyw), str(script)],
+        cwd=str(install_root),
         env=env,
         creationflags=flags,
         close_fds=True,
