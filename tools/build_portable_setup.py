@@ -22,7 +22,7 @@ _EMBED_ZIP_NAME = "python-embed-amd64.zip"
 _MIN_EMBED_ZIP_BYTES = 8_000_000
 
 
-def _ensure_installer_assets() -> tuple[Path, Path]:
+def _ensure_installer_assets(py: Path) -> tuple[Path, Path, Path]:
     assets = ROOT / "installer_assets"
     assets.mkdir(parents=True, exist_ok=True)
     get_pip = assets / "get-pip.py"
@@ -33,7 +33,45 @@ def _ensure_installer_assets() -> tuple[Path, Path]:
     if not embed_zip.is_file() or embed_zip.stat().st_size < _MIN_EMBED_ZIP_BYTES:
         print(f"[INFO] downloading embed python -> {embed_zip}")
         urllib.request.urlretrieve(_EMBED_PYTHON_URL, embed_zip)
-    return get_pip, embed_zip
+    wheels_dir = _ensure_bootstrap_wheels(py)
+    return get_pip, embed_zip, wheels_dir
+
+
+def _ensure_bootstrap_wheels(py: Path) -> Path:
+    wheels_dir = ROOT / "installer_assets" / "bootstrap_wheels"
+    wheels_dir.mkdir(parents=True, exist_ok=True)
+    need = not (
+        any(wheels_dir.glob("pip-*.whl"))
+        and any(wheels_dir.glob("setuptools-*.whl"))
+        and any(wheels_dir.glob("wheel-*.whl"))
+    )
+    if need:
+        print(f"[INFO] downloading bootstrap wheels -> {wheels_dir}")
+        subprocess.check_call(
+            [
+                str(py),
+                "-m",
+                "pip",
+                "download",
+                "pip",
+                "setuptools",
+                "wheel",
+                "-d",
+                str(wheels_dir),
+                "--only-binary",
+                ":all:",
+                "--proxy",
+                "",
+                "-i",
+                "https://pypi.org/simple",
+                "--trusted-host",
+                "pypi.org",
+                "--trusted-host",
+                "files.pythonhosted.org",
+            ],
+            cwd=str(ROOT),
+        )
+    return wheels_dir
 
 
 def main() -> int:
@@ -59,7 +97,7 @@ def main() -> int:
     out_dir = ROOT / "dist"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    get_pip, embed_zip = _ensure_installer_assets()
+    get_pip, embed_zip, bootstrap_wheels = _ensure_installer_assets(py)
     sep = ";" if sys.platform == "win32" else ":"
     cmd = [
         str(py),
@@ -91,6 +129,8 @@ def main() -> int:
         f"{get_pip}{sep}.",
         "--add-data",
         f"{embed_zip}{sep}.",
+        "--add-data",
+        f"{bootstrap_wheels}{sep}bootstrap_wheels",
         "--add-data",
         f"{payload_dst}{sep}.",
         "--distpath",

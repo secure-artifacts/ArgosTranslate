@@ -19,7 +19,11 @@ from urllib.parse import urlparse
 
 from portable_paths import is_install_root, save_install_pointer
 from portable_updater import UPDATE_REL_PATHS
-from network_policy import assert_allowed_download_url, pip_index_attempts
+from network_policy import (
+    assert_allowed_download_url,
+    pip_index_attempts,
+    sanitized_install_environ,
+)
 from win_path_utils import (
     cleanup_broken_install,
     configure_windows_utf8,
@@ -135,7 +139,7 @@ def _emit(
 
 def _subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     configure_windows_utf8()
-    env = os.environ.copy()
+    env, _removed = sanitized_install_environ()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     if extra:
@@ -188,9 +192,9 @@ def _network_troubleshoot_hint() -> str:
     ]
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
         val = os.environ.get(key, "").strip()
-        if val:
+        if val and ("127.0.0.1" in val or "localhost" in val.lower()):
             lines.append(
-                f"  · 环境变量 {key}={val}（若指向无效代理会导致连接被拒绝，可临时删除后重试）"
+                f"  · 检测到 {key}={val}（本地代理未运行时会失败；安装程序已自动忽略，若仍失败请删除该环境变量）"
             )
     return "\n".join(lines)
 
@@ -237,7 +241,8 @@ def _download(
         headers={"User-Agent": "ArgosTranslate-Installer/1.0"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp, open(dest, "wb") as out:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=120) as resp, open(dest, "wb") as out:
             total = int(resp.headers.get("Content-Length") or 0)
             done = 0
             while True:
@@ -305,6 +310,8 @@ def _pip_install_cmd(py: Path, req: Path, index_url: str) -> list[str]:
         "--no-warn-script-location",
         "--default-timeout",
         _PIP_DEFAULT_TIMEOUT,
+        "--proxy",
+        "",
     ]
     if index_url:
         host = urlparse(index_url).netloc
@@ -340,6 +347,8 @@ def _pip_install_package(
                 "--no-warn-script-location",
                 "--default-timeout",
                 _PIP_DEFAULT_TIMEOUT,
+                "--proxy",
+                "",
             ]
         )
         if not req and index_url:
@@ -397,6 +406,17 @@ def _bundled_get_pip_script() -> Path | None:
     return p if p.is_file() else None
 
 
+def _bundled_bootstrap_wheels_dir() -> Path | None:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        p = Path(sys._MEIPASS) / "bootstrap_wheels"
+        if p.is_dir() and any(p.glob("*.whl")):
+            return p
+    p = dev_source_root() / "installer_assets" / "bootstrap_wheels"
+    if p.is_dir() and any(p.glob("*.whl")):
+        return p
+    return None
+
+
 def _bundled_embed_python_zip() -> Path | None:
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base = Path(sys._MEIPASS)
@@ -425,19 +445,20 @@ def _ensure_get_pip_script(dest: Path, cb: ProgressCb | None) -> Path:
 def _install_pip_into_embed(py: Path, embed_dir: Path, cb: ProgressCb | None) -> None:
     _enable_embed_site(embed_dir)
     get_pip = _ensure_get_pip_script(embed_dir.parent / "get-pip.py", cb)
-    _emit(cb, 2, 0.72, "正在配置 pip…")
     py_arg = str(py)
     get_pip_arg = str(get_pip)
-    _run(
-        [py_arg, get_pip_arg, "--no-warn-script-location"],
-        cwd=embed_dir,
-    )
+    wheels = _bundled_bootstrap_wheels_dir()
+    args = [py_arg, get_pip_arg, "--no-warn-script-location"]
+    if wheels is not None:
+        _emit(cb, 2, 0.72, "正在配置 pip（离线）…")
+        args.extend(["--no-index", f"--find-links={wheels}"])
+    else:
+        _emit(cb, 2, 0.72, "正在配置 pip…")
+    _run(args, cwd=embed_dir)
     if not _python_can_import(py, "pip", cwd=embed_dir):
         _enable_embed_site(embed_dir)
-        _run(
-            [py_arg, get_pip_arg, "--no-warn-script-location", "--force-reinstall"],
-            cwd=embed_dir,
-        )
+        retry = [*args, "--force-reinstall"]
+        _run(retry, cwd=embed_dir)
     if not _python_can_import(py, "pip", cwd=embed_dir):
         raise RuntimeError(
             "便携 Python 未能启用 pip。\n"

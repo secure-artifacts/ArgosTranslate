@@ -2,7 +2,24 @@
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlparse
+
+_PROXY_ENV_KEYS: tuple[str, ...] = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "PIP_PROXY",
+    "PIP_INDEX_URL",
+)
+
+_LOCALHOST_PROXY_RE = re.compile(
+    r"(?:^|[/@])(?:127\.0\.0\.1|localhost|0\.0\.0\.0)(?::|\b)",
+    re.IGNORECASE,
+)
 
 # 常见 PyPI 镜像（含 .com 域名但属大陆节点）
 _FORBIDDEN_PIP_HOSTS: frozenset[str] = frozenset(
@@ -82,3 +99,50 @@ def assert_allowed_download_url(url: str) -> str:
             f"当前：{url}"
         )
     return url
+
+
+def _proxy_value_uses_localhost(value: str) -> bool:
+    value = value.strip()
+    if not value:
+        return False
+    if _LOCALHOST_PROXY_RE.search(value):
+        return True
+    try:
+        host = urlparse(value).hostname or ""
+    except Exception:
+        host = ""
+    return host.lower() in {"127.0.0.1", "localhost", "0.0.0.0", "::1"}
+
+
+def sanitized_install_environ(
+    base: dict[str, str] | None = None,
+) -> tuple[dict[str, str], list[str]]:
+    """
+    安装子进程用环境变量：移除指向本机端口的无效代理（常见于 Clash/V2Ray 未启动）。
+    返回 (env, 已移除项说明)。
+    """
+    env = dict(base if base is not None else os.environ)
+    if os.environ.get("ARGOS_INSTALL_USE_PROXY", "").strip() == "1":
+        return env, []
+
+    removed: list[str] = []
+    for key in _PROXY_ENV_KEYS:
+        val = env.get(key, "")
+        if not val:
+            continue
+        if key == "PIP_INDEX_URL":
+            if not os.environ.get("ARGOS_PIP_INDEX_URL", "").strip():
+                removed.append(f"{key}={val}")
+                env.pop(key, None)
+            elif is_forbidden_mainland_china_host(val):
+                removed.append(f"{key}={val}")
+                env.pop(key, None)
+            continue
+        if _proxy_value_uses_localhost(val):
+            removed.append(f"{key}={val}")
+            env.pop(key, None)
+
+    # 让 pip/urllib 直连 pypi.org，不走系统代理
+    env["NO_PROXY"] = "*"
+    env["no_proxy"] = "*"
+    return env, removed
