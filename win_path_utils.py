@@ -25,6 +25,19 @@ def configure_windows_utf8() -> None:
         pass
 
 
+def subprocess_hide_window_kwargs(*, detached: bool = False) -> dict:
+    """Windows 子进程不弹出 cmd 黑窗（安装 pip / mklink / 启动 pythonw 等）。"""
+    if sys.platform != "win32":
+        return {}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    if detached:
+        flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0x00000001)
+    si.wShowWindow = 0  # SW_HIDE
+    return {"creationflags": flags, "startupinfo": si}
+
+
 def path_has_non_ascii(path: Path | str) -> bool:
     try:
         str(path).encode("ascii")
@@ -157,14 +170,13 @@ def ensure_venv_junction(install_root: Path, real_venv: Path) -> None:
     if sys.platform != "win32":
         link.symlink_to(real_venv, target_is_directory=True)
         return
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     r = subprocess.run(
         ["cmd", "/c", "mklink", "/J", str(link), str(real_venv)],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
-        creationflags=flags,
+        **subprocess_hide_window_kwargs(),
     )
     if r.returncode != 0:
         tail = (r.stderr or r.stdout or "").strip()

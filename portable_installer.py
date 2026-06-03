@@ -34,6 +34,7 @@ from win_path_utils import (
     path_has_non_ascii,
     remove_venv_junction,
     remove_venv_storage,
+    subprocess_hide_window_kwargs,
     toolchain_cache_hint,
     venv_storage_dir,
 )
@@ -181,6 +182,7 @@ def _run(
         text=True,
         encoding="utf-8",
         errors="replace",
+        **subprocess_hide_window_kwargs(),
     )
     if r.returncode != 0:
         tail = (r.stderr or r.stdout or "")[-2000:]
@@ -386,6 +388,7 @@ def _pip_streaming_run(
         text=True,
         encoding="utf-8",
         errors="replace",
+        **subprocess_hide_window_kwargs(),
     )
     out_q: queue.Queue[tuple[str, object]] = queue.Queue()
 
@@ -884,13 +887,12 @@ def launch_app(install_root: Path) -> int:
     env["XDG_DATA_HOME"] = str(install_root / "data" / "local")
     env["XDG_CONFIG_HOME"] = str(install_root / "data" / "config")
     env["XDG_CACHE_HOME"] = str(install_root / "data" / "cache")
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0x8) if sys.platform == "win32" else 0
     subprocess.Popen(
         [str(pyw), str(script)],
         cwd=str(install_root),
         env=env,
-        creationflags=flags,
         close_fds=True,
+        **subprocess_hide_window_kwargs(detached=True),
     )
     return 0
 

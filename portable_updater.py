@@ -300,10 +300,12 @@ def launch_gui(target_root: Path) -> bool:
     if pyw.is_file():
         import subprocess
 
+        from win_path_utils import subprocess_hide_window_kwargs
+
         subprocess.Popen(
             [str(pyw), "-c", "from argostranslategui import gui; gui.main()"],
             cwd=str(target_root),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            **subprocess_hide_window_kwargs(),
         )
         return True
     return False

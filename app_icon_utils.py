@@ -169,12 +169,15 @@ def create_start_menu_shortcut(install_root: Path) -> None:
     env = os.environ.copy()
     env["ARGOS_LNK"] = str(lnk)
     try:
+        from win_path_utils import subprocess_hide_window_kwargs
+
         subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
             env=env,
             check=False,
             capture_output=True,
             timeout=30,
+            **subprocess_hide_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         pass

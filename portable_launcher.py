@@ -160,10 +160,13 @@ def _launch_via_venv_pythonw(root: Path) -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
     err_log = log_dir / "launch_errors.log"
     try:
+        from win_path_utils import subprocess_hide_window_kwargs
+
         subprocess.Popen(
             [str(pyw), str(script)],
             cwd=str(root),
             env=env,
+            **subprocess_hide_window_kwargs(detached=True),
         )
     except OSError as e:
         err_log.write_text(f"启动失败: {e}\n", encoding="utf-8")
