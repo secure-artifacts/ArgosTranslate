@@ -1,5 +1,6 @@
 """
 首次安装向导（tkinter，不依赖 PyQt）。
+配色与 portable_ui_theme 浅色主题一致。
 """
 from __future__ import annotations
 
@@ -17,6 +18,16 @@ from portable_installer import (
     install_to,
 )
 from portable_paths import is_install_root, load_install_pointer
+from portable_ui_theme import PALETTE_LIGHT
+
+# 与主界面 QSS 一致
+P = PALETTE_LIGHT
+FONT = ("Microsoft YaHei UI", 10)
+FONT_BOLD = ("Microsoft YaHei UI", 10, "bold")
+FONT_TITLE = ("Microsoft YaHei UI", 16, "bold")
+FONT_SUB = ("Microsoft YaHei UI", 9)
+FONT_STEP = ("Microsoft YaHei UI", 9)
+CHROME_SUB = "#E8F0FE"
 
 
 def _set_wizard_window_icon(root: tk.Tk) -> None:
@@ -35,109 +46,281 @@ def _set_wizard_window_icon(root: tk.Tk) -> None:
             return
 
 
+def _apply_ttk_theme(root: tk.Tk) -> ttk.Style:
+    style = ttk.Style(root)
+    try:
+        style.theme_use("clam")
+    except tk.TclError:
+        pass
+    style.configure(
+        "Install.Horizontal.TProgressbar",
+        troughcolor=P["surface_alt"],
+        background=P["accent"],
+        bordercolor=P["border"],
+        lightcolor=P["accent"],
+        darkcolor=P["accent_pressed"],
+        thickness=12,
+    )
+    style.configure(
+        "Install.TEntry",
+        fieldbackground=P["surface"],
+        bordercolor=P["border"],
+        lightcolor=P["border"],
+        darkcolor=P["border"],
+        padding=6,
+    )
+    return style
+
+
 class InstallWizard:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("本地翻译器 — 安装")
-        self.root.geometry("540x470")
+        self.root.geometry("560x520")
         self.root.resizable(False, False)
+        self.root.configure(bg=P["bg"])
         _set_wizard_window_icon(self.root)
+        self._style = _apply_ttk_theme(self.root)
         self._target = tk.StringVar()
         saved = load_install_pointer()
-        self._target.set(
-            str(saved) if saved else str(default_install_dir())
-        )
+        self._target.set(str(saved) if saved else str(default_install_dir()))
         self._result: Path | None = None
         self._build()
 
+    def _label(
+        self,
+        parent: tk.Misc,
+        *,
+        text: str = "",
+        textvariable: tk.StringVar | None = None,
+        font: tuple = FONT,
+        fg: str | None = None,
+        bg: str | None = None,
+        bold: bool = False,
+        **pack_kw,
+    ) -> tk.Label:
+        kw: dict = {
+            "font": font if not bold else FONT_BOLD,
+            "fg": fg or P["text"],
+            "bg": bg or P["bg"],
+            "justify": "left",
+        }
+        if textvariable is not None:
+            kw["textvariable"] = textvariable
+        else:
+            kw["text"] = text
+        lbl = tk.Label(parent, **kw)
+        lbl.pack(**pack_kw)
+        return lbl
+
+    def _button(
+        self,
+        parent: tk.Misc,
+        text: str,
+        command,
+        *,
+        primary: bool = False,
+        width: int = 10,
+    ) -> tk.Button:
+        if primary:
+            bg, fg, active = P["accent"], "#FFFFFF", P["accent_hover"]
+            bd, relief = 0, "flat"
+        else:
+            bg, fg, active = P["surface"], P["text"], P["surface_alt"]
+            bd, relief = 1, "solid"
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            width=width,
+            font=FONT,
+            bg=bg,
+            fg=fg,
+            activebackground=active,
+            activeforeground=fg if not primary else "#FFFFFF",
+            relief=relief,
+            bd=bd,
+            highlightthickness=1,
+            highlightbackground=P["border"],
+            highlightcolor=P["accent"],
+            cursor="hand2",
+            padx=8,
+            pady=6,
+        )
+        return btn
+
     def _build(self) -> None:
-        pad = {"padx": 12, "pady": 6}
+        header = tk.Frame(self.root, bg=P["chrome_bg"], height=76)
+        header.pack(fill="x")
+        header.pack_propagate(False)
         tk.Label(
-            self.root,
-            text="欢迎使用本地翻译器（俄乌）",
-            font=("Microsoft YaHei UI", 12, "bold"),
-        ).pack(anchor="w", **pad)
+            header,
+            text="本地翻译器（俄乌）",
+            font=FONT_TITLE,
+            fg=P["chrome_fg"],
+            bg=P["chrome_bg"],
+        ).pack(anchor="w", padx=18, pady=(16, 0))
         tk.Label(
-            self.root,
+            header,
+            text="首次安装向导",
+            font=FONT_SUB,
+            fg=CHROME_SUB,
+            bg=P["chrome_bg"],
+        ).pack(anchor="w", padx=18, pady=(2, 0))
+
+        body = tk.Frame(self.root, bg=P["bg"])
+        body.pack(fill="both", expand=True, padx=16, pady=14)
+
+        card = tk.Frame(
+            body,
+            bg=P["surface"],
+            highlightthickness=1,
+            highlightbackground=P["border"],
+        )
+        card.pack(fill="x", pady=(0, 12))
+        card_inner = tk.Frame(card, bg=P["surface"])
+        card_inner.pack(fill="x", padx=14, pady=12)
+
+        self._label(
+            card_inner,
             text=(
                 "只需本安装程序（exe），程序文件已内嵌，无需另下载 zip。\n"
-                "请选择安装文件夹（可任意盘符，支持中文路径如 F:\\本地翻译）。\n"
-                "首次安装需联网（约 5～20 分钟）。安装 PyQt5 / 翻译引擎时\n"
-                "进度条可能停在 70% 左右数分钟，界面会提示「仍在进行」，属正常现象："
+                "请选择安装文件夹（可任意盘符，支持中文路径）。\n"
+                "首次安装需联网（约 5～20 分钟）；进度条停在 70% 左右数分钟属正常。"
             ),
-            justify="left",
+            fg=P["text_muted"],
+            bg=P["surface"],
             wraplength=500,
-        ).pack(anchor="w", **pad)
+        )
 
-        steps_frame = tk.Frame(self.root)
-        steps_frame.pack(anchor="w", padx=12, pady=(0, 4))
+        steps_frame = tk.Frame(card_inner, bg=P["surface"])
+        steps_frame.pack(anchor="w", pady=(10, 0))
         self._step_markers: list[tk.Label] = []
         for i, title in enumerate(INSTALL_STEP_TITLES, start=1):
             lbl = tk.Label(
                 steps_frame,
                 text=f"  {i}. {title}",
                 anchor="w",
-                fg="#666",
-                font=("Microsoft YaHei UI", 9),
+                fg=P["text_muted"],
+                bg=P["surface"],
+                font=FONT_STEP,
             )
-            lbl.pack(anchor="w")
+            lbl.pack(anchor="w", pady=1)
             self._step_markers.append(lbl)
 
-        row = tk.Frame(self.root)
-        row.pack(fill="x", **pad)
-        tk.Entry(row, textvariable=self._target, width=52).pack(
-            side="left", fill="x", expand=True
+        path_card = tk.Frame(
+            body,
+            bg=P["surface"],
+            highlightthickness=1,
+            highlightbackground=P["border"],
         )
-        tk.Button(row, text="浏览…", command=self._browse).pack(
-            side="left", padx=(8, 0)
+        path_card.pack(fill="x", pady=(0, 12))
+        path_inner = tk.Frame(path_card, bg=P["surface"])
+        path_inner.pack(fill="x", padx=14, pady=12)
+        self._label(
+            path_inner,
+            text="安装位置",
+            font=FONT_BOLD,
+            fg=P["text"],
+            bg=P["surface"],
         )
+        row = tk.Frame(path_inner, bg=P["surface"])
+        row.pack(fill="x", pady=(6, 0))
+        entry = tk.Entry(
+            row,
+            textvariable=self._target,
+            font=FONT,
+            bg=P["surface"],
+            fg=P["text"],
+            insertbackground=P["accent"],
+            relief="solid",
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=P["border"],
+            highlightcolor=P["accent"],
+        )
+        entry.pack(side="left", fill="x", expand=True, ipady=4)
+        browse = tk.Button(
+            row,
+            text="浏览…",
+            command=self._browse,
+            font=FONT,
+            bg=P["surface_alt"],
+            fg=P["text"],
+            activebackground=P["sel_bg"],
+            activeforeground=P["accent"],
+            relief="solid",
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=P["border"],
+            cursor="hand2",
+            padx=10,
+            pady=4,
+        )
+        browse.pack(side="left", padx=(8, 0))
+
+        progress_card = tk.Frame(
+            body,
+            bg=P["surface"],
+            highlightthickness=1,
+            highlightbackground=P["border"],
+        )
+        progress_card.pack(fill="x")
+        prog_inner = tk.Frame(progress_card, bg=P["surface"])
+        prog_inner.pack(fill="x", padx=14, pady=12)
 
         self._step_title = tk.StringVar(value="等待开始安装")
-        tk.Label(
-            self.root,
+        self._label(
+            prog_inner,
             textvariable=self._step_title,
-            font=("Microsoft YaHei UI", 10, "bold"),
-        ).pack(anchor="w", **pad)
+            bold=True,
+            fg=P["text"],
+            bg=P["surface"],
+        )
 
         self._pct = tk.IntVar(value=0)
-        bar_row = tk.Frame(self.root)
-        bar_row.pack(fill="x", padx=12, pady=(0, 4))
+        bar_row = tk.Frame(prog_inner, bg=P["surface"])
+        bar_row.pack(fill="x", pady=(8, 6))
         self._bar = ttk.Progressbar(
             bar_row,
+            style="Install.Horizontal.TProgressbar",
             mode="determinate",
             maximum=100,
             variable=self._pct,
             length=420,
         )
         self._bar.pack(side="left", fill="x", expand=True)
-        self._pct_label = tk.Label(bar_row, text="0%", width=5)
+        self._pct_label = tk.Label(
+            bar_row,
+            text="0%",
+            width=5,
+            font=FONT_BOLD,
+            fg=P["accent"],
+            bg=P["surface"],
+        )
         self._pct_label.pack(side="left", padx=(8, 0))
 
         self._detail = tk.StringVar(value="")
-        tk.Label(
-            self.root,
+        self._label(
+            prog_inner,
             textvariable=self._detail,
-            fg="#333",
+            fg=P["text_muted"],
+            bg=P["surface"],
             wraplength=500,
-            justify="left",
-        ).pack(anchor="w", **pad)
+        )
 
-        btn_row = tk.Frame(self.root)
-        btn_row.pack(fill="x", padx=12, pady=12)
-        self._btn_install = tk.Button(
-            btn_row, text="开始安装", width=12, command=self._start_install
+        btn_row = tk.Frame(body, bg=P["bg"])
+        btn_row.pack(fill="x", pady=(14, 0))
+        self._btn_install = self._button(
+            btn_row, "开始安装", self._start_install, primary=True, width=12
         )
         self._btn_install.pack(side="right")
-        self._btn_clean = tk.Button(
-            btn_row,
-            text="清理并重试",
-            width=12,
-            command=self._clean_and_retry,
+        self._btn_clean = self._button(
+            btn_row, "清理并重试", self._clean_and_retry, width=12
         )
         self._btn_clean.pack(side="right", padx=(0, 8))
-        tk.Button(btn_row, text="取消", width=8, command=self.root.destroy).pack(
-            side="right", padx=(0, 8)
-        )
+        cancel = self._button(btn_row, "取消", self.root.destroy, width=8)
+        cancel.pack(side="right", padx=(0, 8))
 
     def _browse(self) -> None:
         d = filedialog.askdirectory(
@@ -150,18 +333,22 @@ class InstallWizard:
     def _highlight_step(self, current: int) -> None:
         for i, lbl in enumerate(self._step_markers, start=1):
             if i < current:
-                lbl.config(fg="#2e7d32", text=f"  ✓ {i}. {INSTALL_STEP_TITLES[i - 1]}")
+                lbl.config(
+                    fg=P["success"],
+                    text=f"  ✓ {i}. {INSTALL_STEP_TITLES[i - 1]}",
+                    font=FONT_STEP,
+                )
             elif i == current:
                 lbl.config(
-                    fg="#1565c0",
+                    fg=P["accent"],
                     text=f"  ▶ {i}. {INSTALL_STEP_TITLES[i - 1]}",
-                    font=("Microsoft YaHei UI", 9, "bold"),
+                    font=FONT_BOLD,
                 )
             else:
                 lbl.config(
-                    fg="#666",
+                    fg=P["text_muted"],
                     text=f"  {i}. {INSTALL_STEP_TITLES[i - 1]}",
-                    font=("Microsoft YaHei UI", 9),
+                    font=FONT_STEP,
                 )
 
     def _apply_progress(self, p: InstallProgress) -> None:
@@ -200,7 +387,7 @@ class InstallWizard:
                 f"文件夹已有内容：\n{path}\n\n仍要安装到此位置吗？",
             ):
                 return
-        self._btn_install.config(state="disabled")
+        self._btn_install.config(state="disabled", bg=P["border"], fg=P["text_muted"])
         self._pct.set(0)
         self._highlight_step(1)
 
@@ -234,7 +421,9 @@ class InstallWizard:
         self.root.after(0, lambda: self._apply_progress(p))
 
     def _install_failed(self) -> None:
-        self._btn_install.config(state="normal")
+        self._btn_install.config(
+            state="normal", bg=P["accent"], fg="#FFFFFF"
+        )
         self._step_title.set("安装失败 — 可点「清理并重试」后再次安装")
 
     def run(self) -> Path | None:
