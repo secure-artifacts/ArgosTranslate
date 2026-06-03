@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 from portable_paths import is_install_root, save_install_pointer
 from portable_updater import UPDATE_REL_PATHS
+from network_policy import pip_index_attempts
 from win_path_utils import (
     cleanup_broken_install,
     configure_windows_utf8,
@@ -63,11 +64,6 @@ _EMBED_PYTHON_URL = (
 )
 _GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 _PIP_DEFAULT_TIMEOUT = "180"
-_PIP_MIRROR_INDEXES: tuple[str, ...] = (
-    "https://pypi.tuna.tsinghua.edu.cn/simple",
-    "https://mirrors.aliyun.com/pypi/simple",
-    "https://pypi.org/simple",
-)
 
 
 def dev_source_root() -> Path:
@@ -233,23 +229,11 @@ def _venv_is_usable(py: Path) -> bool:
     return _python_can_import(py, "pip")
 
 
-def _pip_index_attempts() -> list[str | None]:
-    custom = os.environ.get("ARGOS_PIP_INDEX_URL", "").strip()
-    seen: set[str] = set()
-    attempts: list[str | None] = []
-    if custom:
-        attempts.append(custom)
-        seen.add(custom.rstrip("/").lower())
-    for url in _PIP_MIRROR_INDEXES:
-        key = url.rstrip("/").lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        attempts.append(url)
-    return attempts
+def _pip_index_attempts() -> list[str]:
+    return pip_index_attempts()
 
 
-def _pip_install_cmd(py: Path, req: Path, index_url: str | None) -> list[str]:
+def _pip_install_cmd(py: Path, req: Path, index_url: str) -> list[str]:
     cmd = [
         str(py),
         "-m",
@@ -265,7 +249,7 @@ def _pip_install_cmd(py: Path, req: Path, index_url: str | None) -> list[str]:
         host = urlparse(index_url).netloc
         cmd.extend(["-i", index_url])
         if host:
-            cmd.extend(["--trusted-host", host])
+            cmd.extend(["--trusted-host", host.split(":")[0]])
     return cmd
 
 
@@ -308,9 +292,9 @@ def _pip_install_package(
         except RuntimeError as e:
             last_error = str(e)
     raise RuntimeError(
-        "pip 安装失败（已尝试多个镜像源）。\n"
+        "pip 安装失败（已尝试 pypi.org 及备用镜像）。\n"
         f"{last_error}\n\n"
-        "请检查网络连接，或设置环境变量 ARGOS_PIP_INDEX_URL 为可用镜像后重试。"
+        "请检查网络，或通过 ARGOS_PIP_INDEX_URL 指定可用源（不得使用中国大陆 / .cn 镜像）。"
     )
 
 
@@ -516,7 +500,7 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
         cb,
         3,
         0.05,
-        "正在安装翻译组件（首次约 3～8 分钟，需联网，自动尝试国内镜像）…",
+        "正在安装翻译组件（首次约 3～8 分钟，需联网，从 pypi.org 等源下载）…",
     )
     last_tail = ""
     for index_url in _pip_index_attempts():
@@ -549,9 +533,9 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
             return
         last_tail = f"pip 退出码 {code}（源 {label}）"
     raise RuntimeError(
-        "pip 安装失败（已尝试清华 / 阿里云 / 官方源）。\n"
+        "pip 安装失败（已尝试 pypi.org 及欧美备用镜像）。\n"
         f"{last_tail}\n\n"
-        "请检查网络，或设置 ARGOS_PIP_INDEX_URL 后重试。\n"
+        "请检查网络，或通过 ARGOS_PIP_INDEX_URL 指定可用源（不得使用中国大陆 / .cn 镜像）。\n"
         "也可点击「清理并重试」后再次安装。"
     )
 

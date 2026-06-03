@@ -73,6 +73,8 @@ def main() -> int:
         "--hidden-import",
         "app_version",
         "--hidden-import",
+        "network_policy",
+        "--hidden-import",
         "win_path_utils",
         "--add-data",
         f"{get_pip}{sep}.",

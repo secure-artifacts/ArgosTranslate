@@ -1,0 +1,23 @@
+---
+description: 禁止中国大陆网络资源与镜像（项目硬性约束）
+alwaysApply: true
+---
+
+# 禁止中国大陆网络资源
+
+本项目**不得**使用中国大陆（Mainland China）的服务器、CDN、镜像或 `.cn` 域名。
+
+## pip / 下载
+
+- 默认 PyPI：`pypi.org`，备用为欧美社区镜像（如 Princeton、dotsrc）
+- **禁止**：清华 tuna、阿里云、腾讯云、华为云、中科大等大陆 PyPI 镜像
+- **禁止**：任何 `.cn` 主机
+- 用户自定义 `ARGOS_PIP_INDEX_URL` 须经 `network_policy.assert_allowed_pip_index()` 校验
+
+## 语料 / 模型
+
+- 数据源优先欧洲节点（如 CSC `object.pouta.csc.fi`），见 `tools/build_*_from_opus_zip.py`
+
+## 文档与 UI
+
+- 勿写「国内镜像」「清华/阿里云」等指向大陆源的说明

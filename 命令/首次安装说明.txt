@@ -4,7 +4,7 @@ Argos 本地翻译器 — 安装说明（给用户）
 【推荐：只需一个 exe】
   1）下载 Release 中的 ArgosTranslate-vX.Y.Z.exe
   2）双击 → 选择安装文件夹（如 D:\Apps\ArgosTranslate 或 F:\本地翻译）
-  3）等待自动安装（首次需联网，约 3～8 分钟；pip 会自动尝试国内镜像）
+  3）等待自动安装（首次需联网，约 3～8 分钟；pip 从 pypi.org 等源下载，不使用中国大陆镜像）
   4）以后双击同一 exe 即可打开
 
 【安装失败时】
