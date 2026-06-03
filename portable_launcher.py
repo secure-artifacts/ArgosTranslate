@@ -10,6 +10,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from win_path_utils import configure_windows_utf8, subprocess_path
+
+configure_windows_utf8()
+
 
 def find_portable_root() -> Path:
     try:
@@ -152,8 +156,8 @@ def _launch_via_venv_pythonw(root: Path) -> int:
     err_log = log_dir / "launch_errors.log"
     try:
         subprocess.Popen(
-            [str(pyw), str(script)],
-            cwd=str(root),
+            [subprocess_path(pyw), subprocess_path(script)],
+            cwd=subprocess_path(root),
             env=env,
         )
     except OSError as e:

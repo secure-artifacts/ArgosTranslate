@@ -6,6 +6,10 @@ from __future__ import annotations
 
 import sys
 
+from win_path_utils import configure_windows_utf8
+
+configure_windows_utf8()
+
 from portable_paths import find_portable_root, is_install_root, save_install_pointer
 from portable_installer import launch_app
 

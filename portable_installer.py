@@ -17,6 +17,13 @@ from typing import Callable
 
 from portable_paths import is_install_root, save_install_pointer
 from portable_updater import UPDATE_REL_PATHS
+from win_path_utils import (
+    configure_windows_utf8,
+    embed_toolchain_dir,
+    subprocess_path,
+)
+
+configure_windows_utf8()
 
 INSTALL_STEP_TITLES: tuple[str, ...] = (
     "释放程序文件",
@@ -96,6 +103,7 @@ def _emit(
 
 
 def _subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    configure_windows_utf8()
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
@@ -111,9 +119,10 @@ def _run(
     env: dict[str, str] | None = None,
 ) -> None:
     merged = _subprocess_env(env)
+    run_cwd = subprocess_path(cwd) if cwd else None
     r = subprocess.run(
         cmd,
-        cwd=str(cwd) if cwd else None,
+        cwd=run_cwd,
         env=merged,
         capture_output=True,
         text=True,
@@ -216,21 +225,24 @@ def _install_pip_into_embed(py: Path, embed_dir: Path, cb: ProgressCb | None) ->
     _enable_embed_site(embed_dir)
     get_pip = _ensure_get_pip_script(embed_dir.parent / "get-pip.py", cb)
     _emit(cb, 2, 0.72, "正在配置 pip…")
+    py_arg = subprocess_path(py)
+    get_pip_arg = subprocess_path(get_pip)
     _run(
-        [str(py), str(get_pip), "--no-warn-script-location"],
+        [py_arg, get_pip_arg, "--no-warn-script-location"],
         cwd=embed_dir,
     )
     if not _python_can_import(py, "pip", cwd=embed_dir):
         _enable_embed_site(embed_dir)
         _run(
-            [str(py), str(get_pip), "--no-warn-script-location", "--force-reinstall"],
+            [py_arg, get_pip_arg, "--no-warn-script-location", "--force-reinstall"],
             cwd=embed_dir,
         )
     if not _python_can_import(py, "pip", cwd=embed_dir):
         raise RuntimeError(
             "便携 Python 未能启用 pip。\n"
-            "请删除安装目录下的 _bootstrap 文件夹后重试，"
-            "或改安装到仅含英文路径的位置（如 D:\\ArgosTranslate）。"
+            "请删除安装目录下的 _bootstrap 文件夹后重试；"
+            "若安装路径含中文，也可删除 "
+            "%LOCALAPPDATA%\\ArgosTranslate\\embed-toolchain 后重装。"
         )
 
 
@@ -255,23 +267,25 @@ def _create_venv(install_root: Path, cb: ProgressCb | None) -> Path:
 
     _emit(cb, 2, 0.05, "正在检测本机 Python…")
     launcher = _find_python_launcher()
+    venv_arg = subprocess_path(venv)
     if launcher:
         _emit(cb, 2, 0.35, "正在用本机 Python 创建虚拟环境…")
-        _run([*launcher, "-m", "venv", str(venv)], cwd=install_root)
+        _run([*launcher, "-m", "venv", venv_arg], cwd=install_root)
         _emit(cb, 2, 1.0, "虚拟环境创建完成。")
         return venv / "Scripts" / "python.exe"
 
     _emit(cb, 2, 0.1, "本机未检测到 Python，正在下载便携运行环境（约 25MB）…")
-    embed = install_root / "_bootstrap" / "embed"
-    embed.mkdir(parents=True, exist_ok=True)
+    embed = embed_toolchain_dir(install_root)
     py = _bootstrap_embed_python(embed, cb)
+    py_arg = subprocess_path(py)
+    get_pip_arg = subprocess_path(embed.parent / "get-pip.py")
     _emit(cb, 2, 0.78, "正在安装 virtualenv…")
     _run(
-        [str(py), "-m", "pip", "install", "virtualenv", "--no-warn-script-location"],
+        [py_arg, "-m", "pip", "install", "virtualenv", "--no-warn-script-location"],
         cwd=embed,
     )
     _emit(cb, 2, 0.9, "正在创建虚拟环境…")
-    _run([str(py), "-m", "virtualenv", str(venv)], cwd=install_root)
+    _run([py_arg, "-m", "virtualenv", venv_arg], cwd=install_root)
     _emit(cb, 2, 1.0, "虚拟环境创建完成。")
     return venv / "Scripts" / "python.exe"
 
@@ -340,15 +354,16 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
     )
     proc = subprocess.Popen(
         [
-            str(py),
+            subprocess_path(py),
             "-m",
             "pip",
             "install",
             "-r",
-            str(req),
+            subprocess_path(req),
             "--no-warn-script-location",
         ],
-        cwd=str(install_root),
+        cwd=subprocess_path(install_root),
+        env=_subprocess_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -388,7 +403,10 @@ def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> Non
         return
     tool = install_root / "tools" / "apply_portable_gui_patch.py"
     if tool.is_file():
-        _run([str(py), str(tool)], cwd=install_root)
+        _run(
+            [subprocess_path(py), subprocess_path(tool)],
+            cwd=install_root,
+        )
         _emit(cb, 4, 1.0, "界面补丁已应用。")
         return
     _emit(cb, 4, 1.0, "未找到补丁文件，已跳过。")
@@ -417,18 +435,17 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
 
 
 def launch_app(install_root: Path) -> int:
+    configure_windows_utf8()
     pyw = install_root / "venv" / "Scripts" / "pythonw.exe"
     script = install_root / "portable_launcher.py"
-    env = os.environ.copy()
+    env = _subprocess_env()
     env["XDG_DATA_HOME"] = str(install_root / "data" / "local")
     env["XDG_CONFIG_HOME"] = str(install_root / "data" / "config")
     env["XDG_CACHE_HOME"] = str(install_root / "data" / "cache")
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
     flags = getattr(subprocess, "DETACHED_PROCESS", 0x8) if sys.platform == "win32" else 0
     subprocess.Popen(
-        [str(pyw), str(script)],
-        cwd=str(install_root),
+        [subprocess_path(pyw), subprocess_path(script)],
+        cwd=subprocess_path(install_root),
         env=env,
         creationflags=flags,
         close_fds=True,

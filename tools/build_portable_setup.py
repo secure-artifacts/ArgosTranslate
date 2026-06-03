@@ -72,6 +72,8 @@ def main() -> int:
         "install_wizard",
         "--hidden-import",
         "app_version",
+        "--hidden-import",
+        "win_path_utils",
         "--add-data",
         f"{get_pip}{sep}.",
         "--add-data",

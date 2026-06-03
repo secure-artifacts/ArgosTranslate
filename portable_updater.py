@@ -50,6 +50,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "translation_tab_page.py",
     "translation_source_edit.py",
     "portable_paths.py",
+    "win_path_utils.py",
     "portable_installer.py",
     "install_wizard.py",
     "install_location_dialog.py",

@@ -41,8 +41,7 @@ class InstallWizard:
         tk.Label(
             self.root,
             text=(
-                "请选择安装文件夹（可任意盘符）。\n"
-                "建议使用英文路径（如 D:\\ArgosTranslate），避免纯中文路径导致安装失败。\n"
+                "请选择安装文件夹（可任意盘符，支持中文路径如 F:\\本地翻译）。\n"
                 "首次安装需联网，将自动完成下列步骤（约 3～8 分钟）："
             ),
             justify="left",
