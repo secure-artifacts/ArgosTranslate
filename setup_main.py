@@ -19,6 +19,7 @@ def main() -> int:
         from portable_installer import (
             _bundled_bootstrap_wheels_dir,
             _bundled_embed_python_zip,
+            _bundled_install_wheels_dir,
             bundled_payload_zip,
         )
 
@@ -29,6 +30,8 @@ def main() -> int:
             missing.append("python-embed-amd64.zip")
         if _bundled_bootstrap_wheels_dir() is None:
             missing.append("bootstrap_wheels")
+        if _bundled_install_wheels_dir() is None:
+            missing.append("install_wheels")
         return 0 if not missing else 1
 
     verify_installer_bundle()

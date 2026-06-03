@@ -83,8 +83,9 @@ _PIP_INSTALL_STAGES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "pymorphy2-dicts-uk>=2.4.0",
         ),
     ),
+    ("CTranslate2 核心", ("ctranslate2>=4.0,<5",)),
     (
-        "Argos 翻译引擎",
+        "Argos 翻译组件",
         ("argostranslate>=1.9.0", "argostranslategui>=1.6.0"),
     ),
 )
@@ -343,7 +344,14 @@ def _pip_install_cmd(py: Path, req: Path, index_url: str) -> list[str]:
     return cmd
 
 
-def _pip_packages_cmd(py: Path, packages: tuple[str, ...], index_url: str) -> list[str]:
+def _pip_packages_cmd(
+    py: Path,
+    packages: tuple[str, ...],
+    index_url: str,
+    *,
+    wheels_dir: Path | None = None,
+    offline: bool = False,
+) -> list[str]:
     cmd = [
         str(py),
         "-m",
@@ -358,7 +366,11 @@ def _pip_packages_cmd(py: Path, packages: tuple[str, ...], index_url: str) -> li
         "--proxy",
         "",
     ]
-    if index_url:
+    if wheels_dir is not None:
+        cmd.extend(["--find-links", str(wheels_dir)])
+    if offline:
+        cmd.append("--no-index")
+    elif index_url:
         host = urlparse(index_url).netloc
         cmd.extend(["-i", index_url])
         if host:
@@ -523,6 +535,18 @@ def _bundled_bootstrap_wheels_dir() -> Path | None:
             return p
     p = dev_source_root() / "installer_assets" / "bootstrap_wheels"
     if p.is_dir() and any(p.glob("*.whl")):
+        return p
+    return None
+
+
+def _bundled_install_wheels_dir() -> Path | None:
+    """内嵌 PyQt5 / ctranslate2 / torch 等安装 wheel，避免用户机上下载 200MB+。"""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        p = Path(sys._MEIPASS) / "install_wheels"
+        if p.is_dir() and any(p.glob("ctranslate2-*.whl")):
+            return p
+    p = dev_source_root() / "installer_assets" / "install_wheels"
+    if p.is_dir() and any(p.glob("ctranslate2-*.whl")):
         return p
     return None
 
@@ -759,16 +783,26 @@ def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
 
 def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
     stage_count = len(_PIP_INSTALL_STAGES)
-    _emit(
-        cb,
-        3,
-        0.02,
-        "正在分批安装组件（首次约 5～20 分钟；解压 PyQt5 时可能长时间无新文字，属正常）…",
-    )
+    wheels = _bundled_install_wheels_dir()
+    if wheels is not None:
+        _emit(
+            cb,
+            3,
+            0.02,
+            "正在从安装包内置组件安装（无需联网下载，约 3～10 分钟；解压大组件时可能无新文字）…",
+        )
+    else:
+        _emit(
+            cb,
+            3,
+            0.02,
+            "正在联网安装组件（约 5～20 分钟；VM 下载 CTranslate2/PyTorch 可能很慢）…",
+        )
     stage_idle_hints = {
-        "PyQt5 界面库": "正在解压 PyQt5（体积大，VM/慢盘可能 3～10 分钟无新输出）",
+        "PyQt5 界面库": "正在解压 PyQt5（体积较大，可能数分钟无新输出）",
         "形态分析组件": "正在安装 pymorphy2 词典",
-        "Argos 翻译引擎": "正在下载/安装 Argos 与 CTranslate2（可能较慢）",
+        "CTranslate2 核心": "正在解压 CTranslate2（约 1～3 分钟无新输出属正常）",
+        "Argos 翻译组件": "正在安装 Argos / Stanza / PyTorch（解压最慢，请耐心等待）",
     }
     for stage_idx, (stage_label, packages) in enumerate(_PIP_INSTALL_STAGES):
         stage_base = 0.05 + (0.90 * stage_idx / stage_count)
@@ -776,15 +810,26 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
         idle_hint = stage_idle_hints.get(stage_label, f"仍在安装 {stage_label}")
         success = False
         last_tail = ""
+        attempts: list[tuple[str, str, bool]] = []
+        if wheels is not None:
+            attempts.append(("内置离线包", "", True))
         for index_url in _pip_index_attempts():
             src = urlparse(index_url).netloc if index_url else "pypi.org"
+            attempts.append((src, index_url, False))
+        for src_label, index_url, offline in attempts:
             _emit(
                 cb,
                 3,
                 stage_base,
-                f"[{stage_idx + 1}/{stage_count}] {stage_label} ← {src}",
+                f"[{stage_idx + 1}/{stage_count}] {stage_label} ← {src_label}",
             )
-            cmd = _pip_packages_cmd(py, packages, index_url)
+            cmd = _pip_packages_cmd(
+                py,
+                packages,
+                index_url,
+                wheels_dir=wheels,
+                offline=offline,
+            )
             code = _pip_streaming_run(
                 cmd,
                 cwd=install_root,
@@ -797,10 +842,10 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
             if code == 0:
                 success = True
                 break
-            last_tail = f"pip 退出码 {code}（{stage_label}，源 {src}）"
+            last_tail = f"pip 退出码 {code}（{stage_label}，源 {src_label}）"
         if not success:
             raise RuntimeError(
-                "pip 安装失败（已尝试 pypi.org 及欧美备用镜像）。\n"
+                "pip 安装失败（已尝试内置离线包与 pypi.org 等源）。\n"
                 f"{last_tail}\n\n"
                 "请检查网络，或通过 ARGOS_PIP_INDEX_URL 指定可用源（不得使用中国大陆 / .cn 镜像）。\n"
                 "也可点击「清理并重试」后再次安装。"

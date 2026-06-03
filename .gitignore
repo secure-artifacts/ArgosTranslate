@@ -80,3 +80,4 @@ launcher_stub.py
 
 # Installer bundles (downloaded at CI build; embedded in setup exe)
 installer_assets/python-embed-amd64.zip
+installer_assets/install_wheels/
