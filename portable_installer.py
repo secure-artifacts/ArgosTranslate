@@ -649,10 +649,65 @@ def _create_venv(install_root: Path, cb: ProgressCb | None) -> Path:
     return _create_venv_with_embed(install_root, real_venv, cb)
 
 
+def _payload_root_from_zip(zpath: Path, extract_to: Path) -> Path:
+    if extract_to.exists():
+        shutil.rmtree(extract_to, ignore_errors=True)
+    extract_to.mkdir(parents=True)
+    with zipfile.ZipFile(zpath) as zf:
+        zf.extractall(extract_to)
+    tops = [p for p in extract_to.iterdir() if p.is_dir()]
+    return tops[0] if len(tops) == 1 else extract_to
+
+
+def _copy_payload_item(src: Path, dest: Path) -> None:
+    if src.is_file():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        return
+    if src.is_dir():
+        if dest.exists() and dest.is_dir():
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        elif dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        else:
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+
+
+def _sync_missing_payload_files(install_root: Path, cb: ProgressCb | None) -> None:
+    """已部分释放时补全缺失文件（如 patches/，避免重试安装仍缺补丁）。"""
+    missing = [rel for rel in UPDATE_REL_PATHS if not (install_root / rel).exists()]
+    if not missing:
+        return
+    zpath = bundled_payload_zip()
+    if zpath is None:
+        src_root = dev_source_root()
+        if (src_root / "terminology_bridge.py").is_file():
+            _emit(cb, 1, 0.5, "正在补全缺失程序文件…")
+            for rel in missing:
+                s = src_root / rel
+                if s.exists():
+                    _copy_payload_item(s, install_root / rel)
+            return
+        return
+    _emit(cb, 1, 0.5, f"正在补全 {len(missing)} 项缺失文件…")
+    tmp = install_root / "_payload_sync"
+    try:
+        payload_root = _payload_root_from_zip(zpath, tmp)
+        for rel in missing:
+            src = payload_root / rel
+            if src.exists():
+                _copy_payload_item(src, install_root / rel)
+                _emit(cb, 1, 0.9, f"已补全：{rel}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
     install_root.mkdir(parents=True, exist_ok=True)
     if (install_root / "terminology_bridge.py").is_file():
-        _emit(cb, 1, 1.0, "程序文件已存在，跳过释放。")
+        _sync_missing_payload_files(install_root, cb)
+        _emit(cb, 1, 1.0, "程序文件已就绪。")
         return
 
     src_root = dev_source_root()
@@ -681,13 +736,7 @@ def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
 
     _emit(cb, 1, 0.05, "正在从内嵌程序包释放文件…")
     tmp = install_root / "_payload_extract"
-    if tmp.exists():
-        shutil.rmtree(tmp, ignore_errors=True)
-    tmp.mkdir(parents=True)
-    with zipfile.ZipFile(zpath) as zf:
-        zf.extractall(tmp)
-    tops = [p for p in tmp.iterdir() if p.is_dir()]
-    payload_root = tops[0] if len(tops) == 1 else tmp
+    payload_root = _payload_root_from_zip(zpath, tmp)
     items = list(payload_root.iterdir())
     n = max(1, len(items))
     for i, item in enumerate(items):
@@ -701,6 +750,7 @@ def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
             shutil.copy2(item, dest)
         _emit(cb, 1, 0.2 + 0.8 * (i + 1) / n, f"正在释放：{item.name}")
     shutil.rmtree(tmp, ignore_errors=True)
+    _sync_missing_payload_files(install_root, cb)
     _emit(cb, 1, 1.0, "程序文件释放完成。")
 
 
@@ -766,10 +816,17 @@ def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> Non
         / "argostranslategui"
         / "gui.py"
     )
+    if not patch.is_file():
+        _sync_missing_payload_files(install_root, cb)
     if patch.is_file() and dst.parent.is_dir():
         shutil.copy2(patch, dst)
         _emit(cb, 4, 1.0, "界面补丁已应用。")
         return
+    if not patch.is_file():
+        raise RuntimeError(
+            "安装包不完整：缺少 patches/argostranslategui_gui.py。\n"
+            "请重新下载最新 ArgosTranslate-vX.Y.Z.exe，并点击「清理并重试」。"
+        )
     tool = install_root / "tools" / "apply_portable_gui_patch.py"
     if tool.is_file():
         _run(
@@ -778,7 +835,7 @@ def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> Non
         )
         _emit(cb, 4, 1.0, "界面补丁已应用。")
         return
-    _emit(cb, 4, 1.0, "未找到补丁文件，已跳过。")
+    _emit(cb, 4, 1.0, "未找到补丁工具，已跳过。")
 
 
 def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:

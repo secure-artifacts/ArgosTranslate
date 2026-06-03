@@ -3,6 +3,7 @@
 """
 from __future__ import annotations
 
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -18,12 +19,29 @@ from portable_installer import (
 from portable_paths import is_install_root, load_install_pointer
 
 
+def _set_wizard_window_icon(root: tk.Tk) -> None:
+    if sys.platform != "win32":
+        return
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidates.append(Path(sys._MEIPASS) / "assets" / "app_icon.ico")
+    candidates.append(Path(__file__).resolve().parent / "assets" / "app_icon.ico")
+    for ico in candidates:
+        if ico.is_file():
+            try:
+                root.iconbitmap(str(ico))
+            except Exception:
+                pass
+            return
+
+
 class InstallWizard:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("本地翻译器 — 安装")
         self.root.geometry("540x470")
         self.root.resizable(False, False)
+        _set_wizard_window_icon(self.root)
         self._target = tk.StringVar()
         saved = load_install_pointer()
         self._target.set(

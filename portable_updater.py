@@ -97,8 +97,8 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "wiktionary_parser.py",
     "word_info_dialog.py",
     "tools",
+    "patches/argostranslategui_gui.py",
     "命令",
-    "venv/Lib/site-packages/argostranslategui/gui.py",
 )
 
 PRESERVE_TOP_DIRS = frozenset({"data"})

@@ -133,6 +133,8 @@ def main() -> int:
         f"{bootstrap_wheels}{sep}bootstrap_wheels",
         "--add-data",
         f"{payload_dst}{sep}.",
+        "--add-data",
+        f"{ROOT / 'assets' / 'app_icon.ico'}{sep}assets",
         "--distpath",
         str(out_dir),
         "--workpath",
