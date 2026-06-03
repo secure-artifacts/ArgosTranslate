@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import urllib.error
 import urllib.request
 import zipfile
@@ -68,7 +70,23 @@ _EMBED_PYTHON_URL = (
     f"python-{_EMBED_PYTHON_VERSION}-embed-amd64.zip"
 )
 _GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
-_PIP_DEFAULT_TIMEOUT = "180"
+_PIP_DEFAULT_TIMEOUT = "600"
+_PIP_IDLE_HEARTBEAT_SEC = 15
+_PIP_INSTALL_STAGES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("PyQt5 界面库", ("PyQt5>=5.15.0",)),
+    (
+        "形态分析组件",
+        (
+            "pymorphy2>=0.9.0",
+            "pymorphy2-dicts-ru>=2.4.0",
+            "pymorphy2-dicts-uk>=2.4.0",
+        ),
+    ),
+    (
+        "Argos 翻译引擎",
+        ("argostranslate>=1.9.0", "argostranslategui>=1.6.0"),
+    ),
+)
 _EMBED_ZIP_NAMES = ("python-embed-amd64.zip", "python-embed.zip")
 
 
@@ -308,6 +326,8 @@ def _pip_install_cmd(py: Path, req: Path, index_url: str) -> list[str]:
         "-r",
         str(req),
         "--no-warn-script-location",
+        "--no-input",
+        "--prefer-binary",
         "--default-timeout",
         _PIP_DEFAULT_TIMEOUT,
         "--proxy",
@@ -319,6 +339,93 @@ def _pip_install_cmd(py: Path, req: Path, index_url: str) -> list[str]:
         if host:
             cmd.extend(["--trusted-host", host.split(":")[0]])
     return cmd
+
+
+def _pip_packages_cmd(py: Path, packages: tuple[str, ...], index_url: str) -> list[str]:
+    cmd = [
+        str(py),
+        "-m",
+        "pip",
+        "install",
+        *packages,
+        "--no-warn-script-location",
+        "--no-input",
+        "--prefer-binary",
+        "--default-timeout",
+        _PIP_DEFAULT_TIMEOUT,
+        "--proxy",
+        "",
+    ]
+    if index_url:
+        host = urlparse(index_url).netloc
+        cmd.extend(["-i", index_url])
+        if host:
+            cmd.extend(["--trusted-host", host.split(":")[0]])
+    return cmd
+
+
+def _pip_streaming_run(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    cb: ProgressCb | None,
+    step: int,
+    base_frac: float,
+    span: float,
+    idle_hint: str,
+) -> int:
+    """
+    运行 pip 并逐行回显；长时间无输出时发心跳（Installing PyQt5 等阶段常静默数分钟）。
+    """
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        env=_subprocess_env({"PYTHONUNBUFFERED": "1"}),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    out_q: queue.Queue[tuple[str, object]] = queue.Queue()
+
+    def _reader() -> None:
+        assert proc.stdout is not None
+        try:
+            for line in proc.stdout:
+                out_q.put(("line", line))
+        finally:
+            out_q.put(("done", proc.wait()))
+
+    threading.Thread(target=_reader, daemon=True).start()
+
+    lines = 0
+    idle_rounds = 0
+    sub_frac = base_frac
+    while True:
+        try:
+            kind, payload = out_q.get(timeout=_PIP_IDLE_HEARTBEAT_SEC)
+        except queue.Empty:
+            idle_rounds += 1
+            wait_sec = idle_rounds * _PIP_IDLE_HEARTBEAT_SEC
+            sub_frac = min(base_frac + span * 0.98, sub_frac + span * 0.03)
+            _emit(
+                cb,
+                step,
+                sub_frac,
+                f"{idle_hint}（已等待约 {wait_sec} 秒，仍在进行…）",
+            )
+            continue
+        if kind == "done":
+            return int(payload)
+        line = str(payload).strip()
+        if not line:
+            continue
+        idle_rounds = 0
+        lines += 1
+        sub_frac = min(base_frac + span * 0.98, base_frac + span * min(0.95, lines * 0.04))
+        short = line if len(line) <= 72 else line[:69] + "…"
+        _emit(cb, step, sub_frac, short)
 
 
 def _pip_install_package(
@@ -598,51 +705,54 @@ def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
 
 
 def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
-    req = install_root / "requirements-install.txt"
-    if not req.is_file():
-        req = dev_source_root() / "requirements-install.txt"
+    stage_count = len(_PIP_INSTALL_STAGES)
     _emit(
         cb,
         3,
-        0.05,
-        "正在安装翻译组件（首次约 3～8 分钟，需联网，从 pypi.org 等源下载）…",
+        0.02,
+        "正在分批安装组件（首次约 5～20 分钟；解压 PyQt5 时可能长时间无新文字，属正常）…",
     )
-    last_tail = ""
-    for index_url in _pip_index_attempts():
-        label = index_url or "pypi.org"
-        _emit(cb, 3, 0.08, f"pip 源：{label}")
-        cmd = _pip_install_cmd(py, req, index_url)
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(install_root),
-            env=_subprocess_env(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        assert proc.stdout is not None
-        lines = 0
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            lines += 1
-            frac = min(0.95, 0.08 + lines * 0.015)
-            short = line if len(line) <= 72 else line[:69] + "…"
-            _emit(cb, 3, frac, short)
-        code = proc.wait()
-        if code == 0:
-            _emit(cb, 3, 1.0, "翻译依赖安装完成。")
-            return
-        last_tail = f"pip 退出码 {code}（源 {label}）"
-    raise RuntimeError(
-        "pip 安装失败（已尝试 pypi.org 及欧美备用镜像）。\n"
-        f"{last_tail}\n\n"
-        "请检查网络，或通过 ARGOS_PIP_INDEX_URL 指定可用源（不得使用中国大陆 / .cn 镜像）。\n"
-        "也可点击「清理并重试」后再次安装。"
-    )
+    stage_idle_hints = {
+        "PyQt5 界面库": "正在解压 PyQt5（体积大，VM/慢盘可能 3～10 分钟无新输出）",
+        "形态分析组件": "正在安装 pymorphy2 词典",
+        "Argos 翻译引擎": "正在下载/安装 Argos 与 CTranslate2（可能较慢）",
+    }
+    for stage_idx, (stage_label, packages) in enumerate(_PIP_INSTALL_STAGES):
+        stage_base = 0.05 + (0.90 * stage_idx / stage_count)
+        stage_span = 0.90 / stage_count
+        idle_hint = stage_idle_hints.get(stage_label, f"仍在安装 {stage_label}")
+        success = False
+        last_tail = ""
+        for index_url in _pip_index_attempts():
+            src = urlparse(index_url).netloc if index_url else "pypi.org"
+            _emit(
+                cb,
+                3,
+                stage_base,
+                f"[{stage_idx + 1}/{stage_count}] {stage_label} ← {src}",
+            )
+            cmd = _pip_packages_cmd(py, packages, index_url)
+            code = _pip_streaming_run(
+                cmd,
+                cwd=install_root,
+                cb=cb,
+                step=3,
+                base_frac=stage_base,
+                span=stage_span,
+                idle_hint=idle_hint,
+            )
+            if code == 0:
+                success = True
+                break
+            last_tail = f"pip 退出码 {code}（{stage_label}，源 {src}）"
+        if not success:
+            raise RuntimeError(
+                "pip 安装失败（已尝试 pypi.org 及欧美备用镜像）。\n"
+                f"{last_tail}\n\n"
+                "请检查网络，或通过 ARGOS_PIP_INDEX_URL 指定可用源（不得使用中国大陆 / .cn 镜像）。\n"
+                "也可点击「清理并重试」后再次安装。"
+            )
+    _emit(cb, 3, 1.0, "翻译依赖安装完成。")
 
 
 def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> None:
