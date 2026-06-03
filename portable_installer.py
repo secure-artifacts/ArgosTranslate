@@ -690,6 +690,12 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
         if not is_install_root(install_root):
             raise RuntimeError("安装未完成：缺少 venv 或程序文件。")
         save_install_pointer(install_root)
+        try:
+            from app_icon_utils import create_start_menu_shortcut
+
+            create_start_menu_shortcut(install_root)
+        except Exception:
+            pass
         _emit(cb, 4, 1.0, "安装完成，即将启动软件。")
         return install_root
     except Exception as e:

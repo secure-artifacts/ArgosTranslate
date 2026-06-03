@@ -68,16 +68,21 @@ def _apply_portable_env(root: Path) -> dict[str, str]:
 
 
 def _set_windows_app_user_model_id() -> None:
-    if sys.platform != "win32":
-        return
     try:
-        import ctypes
+        from app_icon_utils import set_windows_app_user_model_id
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "ArgosTranslate.Portable.LocalTranslator.1"
-        )
-    except Exception:
-        pass
+        set_windows_app_user_model_id()
+    except ImportError:
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "ArgosTranslate.Portable.LocalTranslator.1"
+            )
+        except Exception:
+            pass
 
 
 def _bootstrap_for_gui(root: Path) -> None:

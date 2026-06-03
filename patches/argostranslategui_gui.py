@@ -269,72 +269,57 @@ def _portable_app_icon_path() -> Path | None:
     root = _portable_bundle_root()
     if root is None:
         return None
-    assets = root / "assets"
-    for name in ("app_icon.ico", "app_icon.png"):
-        p = assets / name
-        if p.is_file():
-            return p
-    return None
+    try:
+        from app_icon_utils import find_app_icon
 
-
-_WINDOWS_APP_USER_MODEL_ID = "ArgosTranslate.Portable.LocalTranslator.1"
+        return find_app_icon(root)
+    except ImportError:
+        assets = root / "assets"
+        for name in ("app_icon.ico", "app_icon.png"):
+            p = assets / name
+            if p.is_file():
+                return p
+        return None
 
 
 def _set_windows_app_user_model_id() -> None:
-    if sys.platform != "win32":
-        return
     try:
-        import ctypes
+        from app_icon_utils import set_windows_app_user_model_id
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            _WINDOWS_APP_USER_MODEL_ID
-        )
-    except Exception:
-        pass
+        set_windows_app_user_model_id()
+    except ImportError:
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                _WINDOWS_APP_USER_MODEL_ID
+            )
+        except Exception:
+            pass
 
 
 def _apply_windows_taskbar_icon(widget) -> None:
-    """pythonw 启动时任务栏常显示白纸图标；用 Win32 为窗口单独设置 .ico。"""
-    if sys.platform != "win32":
-        return
-    pip = _portable_app_icon_path()
-    if pip is None or not pip.suffix.lower() == ".ico":
-        return
+    """pythonw 启动时任务栏常显示默认图标；用 Win32 为窗口单独设置 .ico。"""
     try:
-        import ctypes
-        from ctypes import wintypes
+        from app_icon_utils import apply_windows_taskbar_icon
 
-        path = str(pip.resolve())
-        user32 = ctypes.windll.user32
-        LR_LOADFROMFILE = 0x10
-        LR_DEFAULTSIZE = 0x40
-        IMAGE_ICON = 1
-        hwnd = wintypes.HWND(int(widget.winId()))
-        if not hwnd:
-            return
-        hicon = user32.LoadImageW(
-            None,
-            path,
-            IMAGE_ICON,
-            0,
-            0,
-            LR_LOADFROMFILE | LR_DEFAULTSIZE,
-        )
-        if not hicon:
-            for size in (32, 16):
-                hicon = user32.LoadImageW(
-                    None, path, IMAGE_ICON, size, size, LR_LOADFROMFILE
-                )
-                if hicon:
-                    break
-        if hicon:
-            WM_SETICON = 0x80
-            ICON_SMALL = 0
-            ICON_BIG = 1
-            user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon)
-            user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon)
+        if not apply_windows_taskbar_icon(widget, _portable_app_icon_path()):
+            info("taskbar icon: apply failed or no .ico")
+    except ImportError:
+        pass
     except Exception as e:
         info(f"taskbar icon: {e}")
+
+
+def _schedule_taskbar_icon_refresh(widget) -> None:
+    try:
+        from app_icon_utils import schedule_taskbar_icon_refresh
+
+        schedule_taskbar_icon_refresh(widget, _portable_app_icon_path())
+    except ImportError:
+        _apply_windows_taskbar_icon(widget)
 
 
 def _get_terminology_bridge():
@@ -1109,10 +1094,10 @@ def _get_translation_tab_page_class():
 class GUIWindow(QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
-        if _fast_startup_enabled() and self._portable_root is not None:
+        if self._portable_root is not None:
             if not getattr(self, "_taskbar_icon_scheduled", False):
                 self._taskbar_icon_scheduled = True
-                QTimer.singleShot(0, lambda: _apply_windows_taskbar_icon(self))
+                _schedule_taskbar_icon_refresh(self)
         else:
             _apply_windows_taskbar_icon(self)
 
@@ -1940,16 +1925,25 @@ class GUIApplication:
         self.app.processEvents()
         if not _fast_startup_enabled():
             _try_apply_portable_ui_theme(self.app)
-        QTimer.singleShot(
-            0, lambda: _apply_windows_taskbar_icon(self.main_window)
-        )
+        portable_root = _portable_bundle_root()
+        if portable_root is not None:
+            _schedule_taskbar_icon_refresh(self.main_window)
+        else:
+            QTimer.singleShot(0, lambda: _apply_windows_taskbar_icon(self.main_window))
         self.app.exec_()
 
     def _apply_window_icon(self) -> None:
+        portable_root = _portable_bundle_root()
         icon = QIcon()
-        pip = _portable_app_icon_path()
-        if pip is not None:
-            icon = QIcon(str(pip))
+        if portable_root is not None:
+            try:
+                from app_icon_utils import make_qicon
+
+                icon = make_qicon(portable_root)
+            except ImportError:
+                pip = _portable_app_icon_path()
+                if pip is not None:
+                    icon = QIcon(str(pip))
         else:
             icon_path = Path(os.path.dirname(__file__)) / "img" / "icon.png"
             if icon_path.is_file():

@@ -22,6 +22,7 @@ from app_version import (
 # 相对安装根目录的路径（文件或目录）；目录会递归复制
 UPDATE_REL_PATHS: tuple[str, ...] = (
     "app_version.py",
+    "app_icon_utils.py",
     "version.json",
     "assets/app_icon.ico",
     "assets/app_icon.png",
