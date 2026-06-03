@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -94,16 +95,26 @@ def _emit(
     )
 
 
+def _subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    if extra:
+        env.update(extra)
+    return env
+
+
 def _run(
     cmd: list[str],
     *,
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> None:
+    merged = _subprocess_env(env)
     r = subprocess.run(
         cmd,
         cwd=str(cwd) if cwd else None,
-        env=env,
+        env=merged,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -111,7 +122,21 @@ def _run(
     )
     if r.returncode != 0:
         tail = (r.stderr or r.stdout or "")[-2000:]
-        raise RuntimeError(f"命令失败 ({r.returncode}): {' '.join(cmd)}\n{tail}")
+        cwd_hint = f"\n工作目录：{cwd}" if cwd else ""
+        raise RuntimeError(
+            f"命令失败 ({r.returncode}): {' '.join(cmd)}{cwd_hint}\n{tail}"
+        )
+
+
+def _python_can_import(py: Path, module: str, *, cwd: Path | None = None) -> bool:
+    try:
+        _run(
+            [str(py), "-c", f"import {module}"],
+            cwd=cwd,
+        )
+        return True
+    except RuntimeError:
+        return False
 
 
 def _download(
@@ -151,10 +176,62 @@ def _find_python_launcher() -> list[str] | None:
 
 
 def _enable_embed_site(embed_dir: Path) -> None:
+    """取消注释 python*._pth 中的 import site（否则 pip 装上了也无法 -m pip）。"""
     for pth in embed_dir.glob("python*._pth"):
         text = pth.read_text(encoding="utf-8")
-        if "import site" not in text:
-            pth.write_text(text.rstrip() + "\nimport site\n", encoding="utf-8")
+        if re.search(r"^\s*import site\s*$", text, re.MULTILINE):
+            continue
+        text = re.sub(
+            r"^\s*#\s*import site\s*$",
+            "import site",
+            text,
+            flags=re.MULTILINE,
+        )
+        if not re.search(r"^\s*import site\s*$", text, re.MULTILINE):
+            text = text.rstrip() + "\nimport site\n"
+        pth.write_text(text, encoding="utf-8")
+
+
+def _bundled_get_pip_script() -> Path | None:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        p = Path(sys._MEIPASS) / "get-pip.py"
+        if p.is_file():
+            return p
+    p = dev_source_root() / "installer_assets" / "get-pip.py"
+    return p if p.is_file() else None
+
+
+def _ensure_get_pip_script(dest: Path, cb: ProgressCb | None) -> Path:
+    bundled = _bundled_get_pip_script()
+    if bundled is not None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(bundled, dest)
+        return dest
+    if not dest.is_file():
+        _download(_GET_PIP_URL, dest, cb, step=2, base_frac=0.55, span=0.15)
+    return dest
+
+
+def _install_pip_into_embed(py: Path, embed_dir: Path, cb: ProgressCb | None) -> None:
+    _enable_embed_site(embed_dir)
+    get_pip = _ensure_get_pip_script(embed_dir.parent / "get-pip.py", cb)
+    _emit(cb, 2, 0.72, "正在配置 pip…")
+    _run(
+        [str(py), str(get_pip), "--no-warn-script-location"],
+        cwd=embed_dir,
+    )
+    if not _python_can_import(py, "pip", cwd=embed_dir):
+        _enable_embed_site(embed_dir)
+        _run(
+            [str(py), str(get_pip), "--no-warn-script-location", "--force-reinstall"],
+            cwd=embed_dir,
+        )
+    if not _python_can_import(py, "pip", cwd=embed_dir):
+        raise RuntimeError(
+            "便携 Python 未能启用 pip。\n"
+            "请删除安装目录下的 _bootstrap 文件夹后重试，"
+            "或改安装到仅含英文路径的位置（如 D:\\ArgosTranslate）。"
+        )
 
 
 def _bootstrap_embed_python(embed_dir: Path, cb: ProgressCb | None) -> Path:
@@ -166,12 +243,7 @@ def _bootstrap_embed_python(embed_dir: Path, cb: ProgressCb | None) -> Path:
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(embed_dir)
         zip_path.unlink(missing_ok=True)
-    _enable_embed_site(embed_dir)
-    get_pip = embed_dir.parent / "get-pip.py"
-    if not get_pip.is_file():
-        _download(_GET_PIP_URL, get_pip, cb, step=2, base_frac=0.55, span=0.15)
-    _emit(cb, 2, 0.72, "正在配置 pip…")
-    _run([str(py), str(get_pip), "--no-warn-script-location"], cwd=embed_dir)
+    _install_pip_into_embed(py, embed_dir, cb)
     return py
 
 

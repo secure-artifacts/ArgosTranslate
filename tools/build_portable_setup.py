@@ -8,9 +8,21 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+_GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+
+
+def _ensure_installer_assets() -> Path:
+    assets = ROOT / "installer_assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    dest = assets / "get-pip.py"
+    if not dest.is_file():
+        print(f"[INFO] downloading get-pip.py -> {dest}")
+        urllib.request.urlretrieve(_GET_PIP_URL, dest)
+    return dest
 
 
 def main() -> int:
@@ -36,6 +48,7 @@ def main() -> int:
     out_dir = ROOT / "dist"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    get_pip = _ensure_installer_assets()
     sep = ";" if sys.platform == "win32" else ":"
     cmd = [
         str(py),
@@ -59,6 +72,8 @@ def main() -> int:
         "install_wizard",
         "--hidden-import",
         "app_version",
+        "--add-data",
+        f"{get_pip}{sep}.",
         "--add-data",
         f"{payload_dst}{sep}.",
         "--distpath",
