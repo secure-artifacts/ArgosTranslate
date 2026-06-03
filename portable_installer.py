@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from urllib.parse import urlparse
 
 from portable_paths import is_install_root, save_install_pointer
 from portable_updater import UPDATE_REL_PATHS
-from network_policy import pip_index_attempts
+from network_policy import assert_allowed_download_url, pip_index_attempts
 from win_path_utils import (
     cleanup_broken_install,
     configure_windows_utf8,
@@ -64,6 +65,7 @@ _EMBED_PYTHON_URL = (
 )
 _GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 _PIP_DEFAULT_TIMEOUT = "180"
+_EMBED_ZIP_NAMES = ("python-embed-amd64.zip", "python-embed.zip")
 
 
 def dev_source_root() -> Path:
@@ -177,6 +179,41 @@ def _python_can_import(py: Path, module: str, *, cwd: Path | None = None) -> boo
         return False
 
 
+def _network_troubleshoot_hint() -> str:
+    lines = [
+        "请检查：",
+        "  · 虚拟机/电脑能否访问 https://www.python.org 与 https://pypi.org",
+        "  · Windows 防火墙、杀毒软件是否拦截安装程序",
+        "  · 虚拟机网络是否为 NAT/桥接且能上网",
+    ]
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            lines.append(
+                f"  · 环境变量 {key}={val}（若指向无效代理会导致连接被拒绝，可临时删除后重试）"
+            )
+    return "\n".join(lines)
+
+
+def _is_network_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    if isinstance(exc, urllib.error.URLError):
+        return True
+    markers = (
+        "urlopen error",
+        "10061",
+        "10060",
+        "10054",
+        "timed out",
+        "connection refused",
+        "connection reset",
+        "无法下载",
+        "getaddrinfo failed",
+        "network is unreachable",
+    )
+    return any(m in text for m in markers)
+
+
 def _download(
     url: str,
     dest: Path,
@@ -186,15 +223,39 @@ def _download(
     base_frac: float = 0.0,
     span: float = 1.0,
 ) -> None:
+    url = assert_allowed_download_url(url)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    _emit(cb, step, base_frac, f"正在下载…")
+    _emit(cb, step, base_frac, f"正在下载：{urlparse(url).netloc}…")
 
     def rep(block: int, block_size: int, total: int) -> None:
         if total > 0 and cb and block % 16 == 0:
             pct = min(1.0, block * block_size / total)
             _emit(cb, step, base_frac + span * pct, f"正在下载… {int(pct * 100)}%")
 
-    urllib.request.urlretrieve(url, dest, rep)
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "ArgosTranslate-Installer/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp, open(dest, "wb") as out:
+            total = int(resp.headers.get("Content-Length") or 0)
+            done = 0
+            while True:
+                chunk = resp.read(256 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                done += len(chunk)
+                if total > 0 and cb and done % (256 * 1024 * 16) < len(chunk):
+                    pct = min(1.0, done / total)
+                    _emit(cb, step, base_frac + span * pct, f"正在下载… {int(pct * 100)}%")
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f"无法下载安装组件（网络连接失败）。\n"
+            f"地址：{url}\n"
+            f"原因：{e}\n\n"
+            f"{_network_troubleshoot_hint()}"
+        ) from e
 
 
 def _find_python_launcher() -> list[str] | None:
@@ -292,9 +353,10 @@ def _pip_install_package(
         except RuntimeError as e:
             last_error = str(e)
     raise RuntimeError(
-        "pip 安装失败（已尝试 pypi.org 及备用镜像）。\n"
+        "pip 安装失败（已尝试 pypi.org 及欧美备用镜像）。\n"
         f"{last_error}\n\n"
-        "请检查网络，或通过 ARGOS_PIP_INDEX_URL 指定可用源（不得使用中国大陆 / .cn 镜像）。"
+        f"{_network_troubleshoot_hint()}\n\n"
+        "也可设置 ARGOS_PIP_INDEX_URL 为其他可用源（不得使用中国大陆 / .cn 镜像）。"
     )
 
 
@@ -335,6 +397,20 @@ def _bundled_get_pip_script() -> Path | None:
     return p if p.is_file() else None
 
 
+def _bundled_embed_python_zip() -> Path | None:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS)
+        for name in _EMBED_ZIP_NAMES:
+            p = base / name
+            if p.is_file():
+                return p
+    for name in _EMBED_ZIP_NAMES:
+        p = dev_source_root() / "installer_assets" / name
+        if p.is_file():
+            return p
+    return None
+
+
 def _ensure_get_pip_script(dest: Path, cb: ProgressCb | None) -> Path:
     bundled = _bundled_get_pip_script()
     if bundled is not None:
@@ -373,8 +449,13 @@ def _bootstrap_embed_python(embed_dir: Path, cb: ProgressCb | None) -> Path:
     py = embed_dir / "python.exe"
     if not py.is_file():
         zip_path = embed_dir.parent / "python-embed.zip"
-        _download(_EMBED_PYTHON_URL, zip_path, cb, step=2, base_frac=0.15, span=0.35)
-        _emit(cb, 2, 0.52, "正在解压便携 Python…")
+        bundled = _bundled_embed_python_zip()
+        if bundled is not None:
+            _emit(cb, 2, 0.15, "正在解压内置便携 Python…")
+            shutil.copy2(bundled, zip_path)
+        else:
+            _download(_EMBED_PYTHON_URL, zip_path, cb, step=2, base_frac=0.15, span=0.35)
+            _emit(cb, 2, 0.52, "正在解压便携 Python…")
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(embed_dir)
         zip_path.unlink(missing_ok=True)
@@ -384,21 +465,24 @@ def _bootstrap_embed_python(embed_dir: Path, cb: ProgressCb | None) -> Path:
 
 def _create_venv_with_embed(install_root: Path, real_venv: Path, cb: ProgressCb | None) -> Path:
     venv_arg = str(real_venv)
-    _emit(cb, 2, 0.1, "正在下载便携运行环境（约 25MB）…")
+    _emit(cb, 2, 0.1, "正在配置便携 Python 环境…")
     embed = embed_toolchain_dir(install_root)
     py = _bootstrap_embed_python(embed, cb)
     py_arg = str(py)
-    _emit(cb, 2, 0.78, "正在安装 virtualenv…")
-    _pip_install_package(
-        Path(py_arg),
-        ["virtualenv"],
-        cwd=embed,
-        cb=cb,
-        step=2,
-        base_frac=0.78,
-    )
-    _emit(cb, 2, 0.9, "正在创建虚拟环境…")
-    _run([py_arg, "-m", "virtualenv", venv_arg], cwd=embed.parent)
+    _emit(cb, 2, 0.85, "正在创建虚拟环境…")
+    try:
+        _run([py_arg, "-m", "venv", venv_arg], cwd=embed.parent)
+    except RuntimeError:
+        _emit(cb, 2, 0.78, "正在安装 virtualenv（需联网访问 pypi.org）…")
+        _pip_install_package(
+            Path(py_arg),
+            ["virtualenv"],
+            cwd=embed,
+            cb=cb,
+            step=2,
+            base_frac=0.78,
+        )
+        _run([py_arg, "-m", "virtualenv", venv_arg], cwd=embed.parent)
     ensure_venv_junction(install_root, real_venv)
     _emit(cb, 2, 1.0, "虚拟环境创建完成。")
     return real_venv / "Scripts" / "python.exe"
@@ -590,8 +674,12 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
     except Exception as e:
         if not is_install_root(install_root):
             cleanup_broken_install(install_root)
+        if _is_network_error(e):
+            raise
         hint = toolchain_cache_hint()
-        raise RuntimeError(f"{e}\n\n若仍失败，可手动删除以下缓存后重试：\n{hint}") from e
+        raise RuntimeError(
+            f"{e}\n\n若仍失败，可手动删除以下缓存后重试：\n{hint}"
+        ) from e
 
 
 def launch_app(install_root: Path) -> int:

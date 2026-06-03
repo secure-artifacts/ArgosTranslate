@@ -16,10 +16,14 @@ from portable_installer import launch_app, verify_installer_bundle
 
 def main() -> int:
     if "--check-bundle" in sys.argv:
-        from portable_installer import bundled_payload_zip
+        from portable_installer import bundled_payload_zip, _bundled_embed_python_zip
 
-        p = bundled_payload_zip()
-        return 0 if p is not None and p.is_file() else 1
+        missing: list[str] = []
+        if bundled_payload_zip() is None:
+            missing.append("app_payload.zip")
+        if _bundled_embed_python_zip() is None:
+            missing.append("python-embed-amd64.zip")
+        return 0 if not missing else 1
 
     verify_installer_bundle()
 

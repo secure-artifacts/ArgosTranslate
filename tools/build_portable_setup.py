@@ -13,16 +13,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 _GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+_EMBED_PYTHON_VERSION = "3.12.10"
+_EMBED_PYTHON_URL = (
+    f"https://www.python.org/ftp/python/{_EMBED_PYTHON_VERSION}/"
+    f"python-{_EMBED_PYTHON_VERSION}-embed-amd64.zip"
+)
+_EMBED_ZIP_NAME = "python-embed-amd64.zip"
+_MIN_EMBED_ZIP_BYTES = 8_000_000
 
 
-def _ensure_installer_assets() -> Path:
+def _ensure_installer_assets() -> tuple[Path, Path]:
     assets = ROOT / "installer_assets"
     assets.mkdir(parents=True, exist_ok=True)
-    dest = assets / "get-pip.py"
-    if not dest.is_file():
-        print(f"[INFO] downloading get-pip.py -> {dest}")
-        urllib.request.urlretrieve(_GET_PIP_URL, dest)
-    return dest
+    get_pip = assets / "get-pip.py"
+    if not get_pip.is_file():
+        print(f"[INFO] downloading get-pip.py -> {get_pip}")
+        urllib.request.urlretrieve(_GET_PIP_URL, get_pip)
+    embed_zip = assets / _EMBED_ZIP_NAME
+    if not embed_zip.is_file() or embed_zip.stat().st_size < _MIN_EMBED_ZIP_BYTES:
+        print(f"[INFO] downloading embed python -> {embed_zip}")
+        urllib.request.urlretrieve(_EMBED_PYTHON_URL, embed_zip)
+    return get_pip, embed_zip
 
 
 def main() -> int:
@@ -48,7 +59,7 @@ def main() -> int:
     out_dir = ROOT / "dist"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    get_pip = _ensure_installer_assets()
+    get_pip, embed_zip = _ensure_installer_assets()
     sep = ";" if sys.platform == "win32" else ":"
     cmd = [
         str(py),
@@ -78,6 +89,8 @@ def main() -> int:
         "win_path_utils",
         "--add-data",
         f"{get_pip}{sep}.",
+        "--add-data",
+        f"{embed_zip}{sep}.",
         "--add-data",
         f"{payload_dst}{sep}.",
         "--distpath",

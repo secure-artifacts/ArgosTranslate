@@ -71,3 +71,14 @@ def pip_index_attempts() -> list[str]:
         seen.add(key)
         attempts.append(url)
     return attempts
+
+
+def assert_allowed_download_url(url: str) -> str:
+    """安装程序联网下载（python.org、pypi 等）须通过策略校验。"""
+    url = url.strip()
+    if is_forbidden_mainland_china_host(url):
+        raise RuntimeError(
+            "禁止使用中国大陆下载地址。\n"
+            f"当前：{url}"
+        )
+    return url
