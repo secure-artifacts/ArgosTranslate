@@ -23,7 +23,7 @@
     {"zh": "最后", "ru": "наконец", "note": "discourse marker"},
     {"zh": "例如", "ru": "например", "note": "Wiktionary"},
     {"zh": "尤其是", "ru": "особенно", "note": "Tatoeba"},
-    {"zh": "目前", "ru": "в настоящее время", "note": "professional register"},
+    {"zh": "目前", "ru": "сейчас", "note": "news/colloquial — avoid MT в настоящее время"},
     {"zh": "根据", "ru": "в соответствии с", "note": "legal/business — Sussex"},
     {"zh": "由于", "ru": "в связи с", "note": "formal cause"},
     {"zh": "关于", "ru": "относительно", "note": "Wiktionary"},

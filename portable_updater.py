@@ -65,7 +65,16 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "argos_cpu_tuning.py",
     "argos_enhance.py",
     "argos_quality_guard.py",
+    "argos_translation_quality.py",
     "translation_memory.py",
+    "review_queue_dialog.py",
+    "corpus_pipeline/lang_filter.py",
+    "lang_pair_filter.py",
+    "tm_paste_import_dialog.py",
+    "tm_viewer_dialog.py",
+    "tm_glossary_help.py",
+    "tm_manage_actions.py",
+    "segmented_manuscript_panel.py",
     "corpus_pipeline",
     "bidirectional_terminology.py",
     "slavic_lemma_rank.py",
@@ -100,6 +109,17 @@ _DATA_UPDATE_PREFIXES = (
     "data/glossary/international",
 )
 
+_PRIVATE_REL_PATHS = frozenset(
+    {
+        "data/config/translation_history.json",
+        "data/config/word_lookup_notebook.json",
+        "data/config/ui_session.json",
+        "data/config/ui_prefs.json",
+        "data/config/glossary_gui_prefs.json",
+        "data/config/speech_audio.json",
+    }
+)
+
 
 def _data_path_updatable(rel: Path) -> bool:
     s = rel.as_posix()
@@ -107,6 +127,8 @@ def _data_path_updatable(rel: Path) -> bool:
 
 
 def _skip_payload_rel(rel: Path) -> bool:
+    if rel.as_posix() in _PRIVATE_REL_PATHS:
+        return True
     if rel.suffix == ".pyc":
         return True
     return "__pycache__" in rel.parts

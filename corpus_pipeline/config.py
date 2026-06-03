@@ -17,6 +17,7 @@ TM_LOG = REPORTS / "tm_hits.log"
 QUARANTINE_DIR = DATA / "quarantine"
 CANDIDATE_PAIRS_DIR = DATA / "candidate_pairs"
 MANUAL_REVIEW_DIR = DATA / "manual_review_queue"
+PENDING_TM_DIR = DATA / "pending_tm"
 GOLD_CORPUS_DIR = DATA / "gold_corpus"
 TRANSLATION_EVAL_DIR = DATA / "translation_eval"
 LOGS_DIR = ROOT / "logs"
@@ -67,3 +68,14 @@ REVIEW_TM_PURITY_MIN = float(os.environ.get("REVIEW_TM_PURITY_MIN", "0.75"))
 
 # UN 默认不自动灌 TM（仅 candidate + manual_review）
 UN_AUTO_TM = os.environ.get("UN_AUTO_TM", "0").strip() in ("1", "true", "yes")
+
+# 用户反馈闭环（GUI 采纳 / 低分自动入队）
+USER_FEEDBACK_SOURCE = "user"
+USER_PROMOTE_TM_PURITY_MIN = float(os.environ.get("USER_PROMOTE_TM_PURITY_MIN", "0.75"))
+USER_LOCK_TERM_PURITY_MIN = float(os.environ.get("USER_LOCK_TERM_PURITY_MIN", "0.82"))
+USER_AUTO_REVIEW_QUEUE = os.environ.get("ARGOS_AUTO_REVIEW_QUEUE", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)

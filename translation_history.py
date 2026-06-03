@@ -36,6 +36,38 @@ def load_items() -> list[dict[str, Any]]:
     return []
 
 
+def save_items(items: list[dict[str, Any]]) -> None:
+    """覆盖保存历史列表。"""
+    path = history_path()
+    tmp = path.with_suffix(".json.tmp")
+    payload = {"version": 1, "items": [x for x in items if isinstance(x, dict)]}
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    tmp.replace(path)
+
+
+def delete_indices(indices: list[int]) -> int:
+    """按索引删除多条记录，返回删除数量。"""
+    items = load_items()
+    if not items:
+        return 0
+    to_del = {i for i in indices if isinstance(i, int) and 0 <= i < len(items)}
+    if not to_del:
+        return 0
+    kept = [it for i, it in enumerate(items) if i not in to_del]
+    save_items(kept)
+    return len(items) - len(kept)
+
+
+def clear_all() -> int:
+    """清空全部历史，返回清空前条数。"""
+    items = load_items()
+    if not items:
+        return 0
+    save_items([])
+    return len(items)
+
+
 def append_record(
     source: str,
     target: str,
@@ -60,9 +92,4 @@ def append_record(
     items = load_items()
     items.insert(0, entry)
     del items[max_items:]
-    path = history_path()
-    tmp = path.with_suffix(".json.tmp")
-    payload = {"version": 1, "items": items}
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    tmp.replace(path)
+    save_items(items)

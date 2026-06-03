@@ -373,6 +373,74 @@ def load_test_set(name: str) -> list[dict[str, Any]]:
     return out
 
 
+def user_regression_path() -> Path:
+    return test_sets_dir() / "user_gold_regression.jsonl"
+
+
+def append_user_regression_case(
+    source: str,
+    reference: str,
+    source_lang: str,
+    target_lang: str,
+    *,
+    tags: list[str] | None = None,
+    case_id: str | None = None,
+) -> str:
+    """用户 gold 句对写入 regression 测试集（防规则/TM 退化）。"""
+    import hashlib
+
+    src = (source or "").strip()
+    ref = (reference or "").strip()
+    cid = case_id or f"user_{hashlib.sha256(src.encode('utf-8')).hexdigest()[:12]}"
+    path = user_regression_path()
+    existing_ids: set[str] = set()
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                existing_ids.add(str(json.loads(line).get("id") or ""))
+            except json.JSONDecodeError:
+                continue
+    if cid in existing_ids:
+        return cid
+    case = {
+        "id": cid,
+        "source": src,
+        "reference": ref,
+        "source_lang": (source_lang or "zh").strip().lower(),
+        "target_lang": (target_lang or "ru").strip().lower(),
+        "tags": list(tags or ["user_gold", "regression"]),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(case, ensure_ascii=False) + "\n")
+    return cid
+
+
+def run_regression_guard(
+    translate_fn=None,
+    *,
+    sets: tuple[str, ...] = ("user_gold_regression", "zh_person_descriptions"),
+) -> dict[str, Any]:
+    """推广后或发版前：跑关键 regression 集，检测 glossary/风格退化。"""
+    summary: dict[str, Any] = {"sets": {}, "ok": True}
+    for name in sets:
+        p = test_sets_dir() / f"{name}.jsonl"
+        if not p.is_file():
+            summary["sets"][name] = {"skipped": True}
+            continue
+        rep = run_eval_set(name, translate_fn=translate_fn)
+        summary["sets"][name] = rep
+        avg = float(rep.get("avg_native_fluency_score") or 0)
+        locked = float(rep.get("avg_locked_entity_consistency") or 1)
+        if avg < 0.45 and translate_fn is not None:
+            summary["ok"] = False
+        if locked < 0.85:
+            summary["ok"] = False
+    return summary
+
+
 def build_baseline_from_gold(source: str = "un", *, limit: int = 50) -> Path:
     sp = GOLD_CORPUS_DIR / source / "sentences.jsonl"
     out = test_sets_dir() / f"gold_{source}_baseline.jsonl"

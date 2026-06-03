@@ -1,0 +1,8 @@
+{"id": "person_truth", "source_lang": "zh", "target_lang": "ru", "source": "柳芭姊妹是个追求真理的人", "reference": "Сестра Люба — человек, стремящийся к истине.", "tags": ["person_trait", "religious"]}
+{"id": "person_optimistic", "source_lang": "zh", "target_lang": "ru", "source": "柳芭姊妹是一个乐观的人", "reference": "Сестра Люба — оптимистичный человек.", "tags": ["person_trait"]}
+{"id": "person_love_lord", "source_lang": "zh", "target_lang": "ru", "source": "彼得弟兄是个爱主的人", "reference": "Брат Петр — человек, любящий Господа.", "tags": ["person_trait", "religious"]}
+{"id": "person_righteousness", "source_lang": "zh", "target_lang": "ru", "source": "安娜姊妹是个追求公义的人", "reference": "Сестра Анна — человек, стремящийся к праведности.", "tags": ["person_trait", "religious"]}
+{"id": "person_faithful_service", "source_lang": "zh", "target_lang": "ru", "source": "大卫是个忠心服事的人", "reference": "Давид — человек, верно служащий.", "tags": ["person_trait", "religious"]}
+{"id": "person_gospel", "source_lang": "zh", "target_lang": "ru", "source": "约翰是个传福音的人", "reference": "Иоанн — человек, проповедующий Евангелие.", "tags": ["person_trait", "religious"]}
+{"id": "person_humble", "source_lang": "zh", "target_lang": "ru", "source": "马利亚是个温柔谦卑的人", "reference": "Мария — кроткий и смиренный человек.", "tags": ["person_trait"]}
+{"id": "person_honest", "source_lang": "zh", "target_lang": "ru", "source": "他是一个很诚实的人", "reference": "Он — честный человек.", "tags": ["person_trait"]}

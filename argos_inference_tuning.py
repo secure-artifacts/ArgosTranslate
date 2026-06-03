@@ -51,10 +51,21 @@ def _short_decoding_tokens(text: str) -> int:
 def debounce_ms_for_text(text: str) -> int:
     tier = text_tier(text)
     if tier == "short":
-        return 100
+        return 450
     if tier == "medium":
-        return 220
-    return 300
+        return 800
+    return 1200
+
+
+def debounce_ms_for_char_count(chars: int, *, block_count: int = 1) -> int:
+    """按字数估算去抖（避免每次按键 toPlainText 全量扫描）。"""
+    n = max(0, int(chars))
+    nl = max(1, int(block_count))
+    if n < 120 and nl < 2:
+        return 450
+    if n < 260 and nl < 4:
+        return 800
+    return 1200
 
 
 def _scaled_max_decoding_tokens(text: str, saved: dict[str, object]) -> int:

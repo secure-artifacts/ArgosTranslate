@@ -113,6 +113,26 @@ def _try_fix_mojibake_utf8(text: str) -> str:
     return text
 
 
+# 「是个」与「是一个」等送入模型前统一，避免同义两句机译结果分叉
+_ZH_COPULA_GE_NORMALIZE: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"是个"), "是一个"),
+    (re.compile(r"(?<=[\u4e00-\u9fff])是位(?=[\u4e00-\u9fff])"), "是一位"),
+    (re.compile(r"(?<=[\u4e00-\u9fff])是名(?=[\u4e00-\u9fff])"), "是一名"),
+    (re.compile(r"都是个"), "都是一个"),
+    (re.compile(r"也是个"), "也是一个"),
+)
+
+
+def normalize_zh_copula_ge(text: str) -> str:
+    """统一「是个/是一个/是位」等谓语量词，使 Argos 输入一致。"""
+    if not text:
+        return text
+    t = text
+    for pat, repl in _ZH_COPULA_GE_NORMALIZE:
+        t = pat.sub(repl, t)
+    return t
+
+
 def normalize_zh_for_mt(text: str) -> str:
     """中文源文送入 Argos 前的安全整理（合同/长文可减少无谓噪声）。"""
     if not text:
@@ -122,6 +142,7 @@ def normalize_zh_for_mt(text: str) -> str:
     t = t.replace("\u00a0", " ").replace("\u202f", " ").replace("\u2009", " ")
     t = re.sub(r"[ \t]+\n", "\n", t)
     t = re.sub(r"\n{5,}", "\n\n\n\n", t)
+    t = normalize_zh_copula_ge(t)
     return t
 
 

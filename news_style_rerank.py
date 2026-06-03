@@ -42,7 +42,9 @@ def _phrase_patterns(lang: str) -> tuple[dict[str, Any], ...]:
 
 def _domain_verbs(zh_verb: str, domain: str, lang: str) -> list[str]:
     cfg = _phrase_config()
-    dv = cfg.get("domain_verbs") or {}
+    code = normalize_source_lang(lang)
+    key = "domain_verbs_uk" if code == "uk" else "domain_verbs"
+    dv = cfg.get(key) or cfg.get("domain_verbs") or {}
     cell = dv.get(zh_verb) or {}
     if not isinstance(cell, dict):
         return []

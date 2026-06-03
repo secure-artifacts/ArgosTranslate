@@ -944,8 +944,9 @@ class DownloadPackagesWindow(QWidget):
 class TranslationHistoryDialog(QDialog):
     """本地保存的翻译快照列表（语音会话中清空原文时写入）。"""
 
-    def __init__(self, parent, items: list):
+    def __init__(self, parent, mod, items: list):
         super().__init__(parent)
+        self._mod = mod
         self.setWindowTitle("翻译历史")
         self.resize(920, 540)
         self._items = list(items)
@@ -960,6 +961,7 @@ class TranslationHistoryDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
         self.table.setWordWrap(True)
@@ -987,6 +989,12 @@ class TranslationHistoryDialog(QDialog):
         copy_btn = QPushButton("复制所选行（原文+译文）")
         copy_btn.clicked.connect(self._copy_selected)
         btn_row.addWidget(copy_btn)
+        del_btn = QPushButton("删除所选")
+        del_btn.clicked.connect(self._delete_selected)
+        btn_row.addWidget(del_btn)
+        clear_btn = QPushButton("全部清除")
+        clear_btn.clicked.connect(self._clear_all)
+        btn_row.addWidget(clear_btn)
         btn_row.addStretch()
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(self.accept)
@@ -1002,6 +1010,63 @@ class TranslationHistoryDialog(QDialog):
         src = it.get("source") or ""
         tgt = it.get("target") or ""
         QApplication.clipboard().setText(f"{src}\n---\n{tgt}")
+
+    def _selected_rows(self) -> list[int]:
+        rows = {idx.row() for idx in self.table.selectionModel().selectedRows()}
+        return sorted([r for r in rows if 0 <= r < len(self._items)])
+
+    def _delete_selected(self) -> None:
+        rows = self._selected_rows()
+        if not rows:
+            QMessageBox.information(self, "翻译历史", "请先选择要删除的记录。")
+            return
+        ok = QMessageBox.question(
+            self,
+            "翻译历史",
+            f"确认删除选中的 {len(rows)} 条记录？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if ok != QMessageBox.Yes:
+            return
+        removed = 0
+        if hasattr(self._mod, "delete_indices"):
+            try:
+                removed = int(self._mod.delete_indices(rows) or 0)
+            except Exception:
+                removed = 0
+        if removed <= 0:
+            QMessageBox.warning(self, "翻译历史", "删除失败，请稍后重试。")
+            return
+        keep_idx = [i for i, _ in enumerate(self._items) if i not in set(rows)]
+        self._items = [self._items[i] for i in keep_idx]
+        for r in sorted(rows, reverse=True):
+            self.table.removeRow(r)
+
+    def _clear_all(self) -> None:
+        if not self._items:
+            QMessageBox.information(self, "翻译历史", "当前没有可清除的记录。")
+            return
+        ok = QMessageBox.warning(
+            self,
+            "翻译历史",
+            "确认清空全部翻译历史？该操作不可撤销。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if ok != QMessageBox.Yes:
+            return
+        cleared = 0
+        if hasattr(self._mod, "clear_all"):
+            try:
+                cleared = int(self._mod.clear_all() or 0)
+            except Exception:
+                cleared = 0
+        if cleared <= 0 and self._items:
+            QMessageBox.warning(self, "翻译历史", "清空失败，请稍后重试。")
+            return
+        self._items = []
+        self.table.setRowCount(0)
 
 
 _translation_tab_page_cls = None
@@ -1502,7 +1567,7 @@ class GUIWindow(QMainWindow):
             )
             return
         items = mod.load_items()
-        dlg = TranslationHistoryDialog(self, items)
+        dlg = TranslationHistoryDialog(self, mod, items)
         dlg.exec_()
 
     def word_notebook_action_triggered(self) -> None:

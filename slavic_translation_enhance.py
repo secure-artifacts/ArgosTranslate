@@ -155,6 +155,21 @@ def postprocess_argos_target(
                     )
                 except ImportError:
                     pass
+            try:
+                from native_fluency_config import (
+                    detect_domain,
+                    native_fluency_enabled,
+                )
+                from news_style_rerank import apply_anti_mt_patterns
+
+                if native_fluency_enabled() and source_text:
+                    text = apply_anti_mt_patterns(
+                        text,
+                        tgt,
+                        domain=detect_domain(source_text),
+                    )
+            except ImportError:
+                pass
         return text
     if hasattr(tq, "touchup_cyrillic_target_spacing"):
         return tq.touchup_cyrillic_target_spacing(text)

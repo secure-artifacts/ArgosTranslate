@@ -3281,4 +3281,22 @@ class ClickableTranslationTextEdit(QTextEdit):
             if is_paste_plain_shortcut(event):
                 paste_plain_into_text_edit(self)
                 return
+        elif self._lookup_role == "target":
+            from translation_source_edit import (
+                is_paste_plain_shortcut,
+                is_paste_shortcut,
+                paste_plain_into_text_edit,
+            )
+
+            if is_paste_plain_shortcut(event) or is_paste_shortcut(event):
+                paste_plain_into_text_edit(self, for_target=True)
+                return
         super().keyPressEvent(event)
+
+    def insertFromMimeData(self, source) -> None:
+        if self._lookup_role == "target":
+            from translation_source_edit import insert_plain_from_mime
+
+            if insert_plain_from_mime(self, source, for_target=True):
+                return
+        super().insertFromMimeData(source)

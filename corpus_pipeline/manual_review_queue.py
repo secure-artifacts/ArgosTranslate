@@ -120,3 +120,30 @@ def set_status(source: str, item_id: str, status: str, *, note: str = "") -> boo
         for row in idx.values():
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     return True
+
+
+def delete_items(source: str, item_ids: list[str]) -> int:
+    """从审核队列文件中永久删除条目（任意 status）。"""
+    ids = [str(i).strip() for i in item_ids if str(i).strip()]
+    if not ids:
+        return 0
+    path = queue_file(source)
+    idx = _load_index(path)
+    deleted = 0
+    for iid in ids:
+        if iid in idx:
+            del idx[iid]
+            deleted += 1
+    if not deleted:
+        return 0
+    with open(path, "w", encoding="utf-8") as f:
+        for row in idx.values():
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return deleted
+
+
+def delete_all_pending(source: str) -> int:
+    """永久删除某来源审核队列中的全部 pending 条目。"""
+    pending = list_pending(source)
+    ids = [str(i.get("id") or "") for i in pending if i.get("id")]
+    return delete_items(source, ids)

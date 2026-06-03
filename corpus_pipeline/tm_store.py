@@ -1,6 +1,7 @@
 """翻译记忆库（SQLite）：精确 + 模糊匹配，带来源与相似度。"""
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -175,11 +176,247 @@ def insert_pairs(
     return added, skipped, quarantined
 
 
-def count_entries(db_path: Path | None = None) -> int:
+def count_entries(
+    db_path: Path | None = None,
+    *,
+    source_lang: str | None = None,
+    target_lang: str | None = None,
+) -> int:
     conn = _connect(db_path)
-    row = conn.execute("SELECT COUNT(*) FROM translation_memory").fetchone()
+    sql = "SELECT COUNT(*) FROM translation_memory"
+    params: list[str] = []
+    if source_lang and target_lang:
+        sql += " WHERE source_lang = ? AND target_lang = ?"
+        params.extend([source_lang, target_lang])
+    elif source_lang:
+        sql += " WHERE source_lang = ?"
+        params.append(source_lang)
+    elif target_lang:
+        sql += " WHERE target_lang = ?"
+        params.append(target_lang)
+    row = conn.execute(sql, params).fetchone()
     conn.close()
     return int(row[0]) if row else 0
+
+
+def iter_entries(
+    *,
+    source_lang: str | None = None,
+    target_lang: str | None = None,
+    db_path: Path | None = None,
+    limit: int | None = None,
+) -> list[TMEntry]:
+    """列出 TM 条目（可选按语言对过滤）。"""
+    conn = _connect(db_path)
+    sql = """
+        SELECT source_text, target_text, source_lang, target_lang,
+               domain, confidence_score, source_url, tm_purity_score
+        FROM translation_memory
+    """
+    params: list[str] = []
+    if source_lang and target_lang:
+        sql += " WHERE source_lang = ? AND target_lang = ?"
+        params.extend([source_lang, target_lang])
+    elif source_lang:
+        sql += " WHERE source_lang = ?"
+        params.append(source_lang)
+    elif target_lang:
+        sql += " WHERE target_lang = ?"
+        params.append(target_lang)
+    sql += " ORDER BY id DESC"
+    if limit is not None and limit > 0:
+        sql += f" LIMIT {int(limit)}"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    out: list[TMEntry] = []
+    for r in rows:
+        out.append(
+            TMEntry(
+                source_text=r["source_text"] or "",
+                target_text=r["target_text"] or "",
+                source_lang=r["source_lang"] or "",
+                target_lang=r["target_lang"] or "",
+                domain=r["domain"] or "",
+                confidence_score=float(r["confidence_score"] or 0.8),
+                source_url=r["source_url"] or "",
+                tm_purity_score=float(r["tm_purity_score"] or 0.75),
+            )
+        )
+    return out
+
+
+def delete_entries(
+    entries: Iterable[TMEntry],
+    *,
+    db_path: Path | None = None,
+    delete_reverse: bool = True,
+) -> int:
+    """从 TM 删除指定句对；可选同时删除反向句对。返回实际删除行数。"""
+    from corpus_pipeline.quality import normalize_source_for_storage
+
+    items = list(entries)
+    if not items:
+        return 0
+    conn = _connect(db_path)
+    deleted = 0
+    seen: set[tuple[str, str, str]] = set()
+    for p in items:
+        src_store = normalize_source_for_storage(p.source_text, p.source_lang)
+        key = (p.source_lang, p.target_lang, src_store)
+        if key not in seen:
+            seen.add(key)
+            cur = conn.execute(
+                """
+                DELETE FROM translation_memory
+                WHERE source_lang = ? AND target_lang = ? AND source_text = ?
+                """,
+                key,
+            )
+            deleted += cur.rowcount
+        if delete_reverse:
+            rev_store = normalize_source_for_storage(p.target_text, p.target_lang)
+            rev_key = (p.target_lang, p.source_lang, rev_store)
+            if rev_key not in seen:
+                seen.add(rev_key)
+                cur = conn.execute(
+                    """
+                    DELETE FROM translation_memory
+                    WHERE source_lang = ? AND target_lang = ? AND source_text = ?
+                    """,
+                    rev_key,
+                )
+                deleted += cur.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def delete_lang_pair(
+    source_lang: str,
+    target_lang: str,
+    *,
+    db_path: Path | None = None,
+    bidirectional: bool = True,
+) -> int:
+    """删除某语言对下的全部 TM 条目。"""
+    conn = _connect(db_path)
+    deleted = 0
+    cur = conn.execute(
+        """
+        DELETE FROM translation_memory
+        WHERE source_lang = ? AND target_lang = ?
+        """,
+        (source_lang, target_lang),
+    )
+    deleted += cur.rowcount
+    if bidirectional:
+        cur = conn.execute(
+            """
+            DELETE FROM translation_memory
+            WHERE source_lang = ? AND target_lang = ?
+            """,
+            (target_lang, source_lang),
+        )
+        deleted += cur.rowcount
+    conn.commit()
+    conn.close()
+    return int(deleted)
+
+
+def delete_all_entries(*, db_path: Path | None = None) -> int:
+    """清空 TM 数据库全部条目。"""
+    conn = _connect(db_path)
+    cur = conn.execute("DELETE FROM translation_memory")
+    deleted = int(cur.rowcount)
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def delete_filtered(
+    *,
+    source_lang: str | None = None,
+    target_lang: str | None = None,
+    db_path: Path | None = None,
+) -> int:
+    """按语言侧删除 TM 条目（可只指定源语或目标语）。"""
+    if not source_lang and not target_lang:
+        return delete_all_entries(db_path=db_path)
+    conn = _connect(db_path)
+    sql = "DELETE FROM translation_memory"
+    params: list[str] = []
+    if source_lang and target_lang:
+        sql += " WHERE source_lang = ? AND target_lang = ?"
+        params.extend([source_lang, target_lang])
+    elif source_lang:
+        sql += " WHERE source_lang = ?"
+        params.append(source_lang)
+    else:
+        sql += " WHERE target_lang = ?"
+        params.append(target_lang or "")
+    cur = conn.execute(sql, params)
+    deleted = int(cur.rowcount)
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def _fuzzy_scan_limit() -> int:
+    try:
+        return max(100, int(os.environ.get("ARGOS_TM_FUZZY_SCAN_LIMIT", "1200")))
+    except ValueError:
+        return 1200
+
+
+def _match_from_row(
+    r: sqlite3.Row,
+    *,
+    ratio: float,
+) -> TMMatch:
+    kind = "exact" if ratio >= 0.999 else "fuzzy"
+    purity = float(r["tm_purity_score"] or 0.75)
+    conf = float(r["confidence_score"] or 0.8)
+    return TMMatch(
+        source_text=r["source_text"] or "",
+        target_text=r["target_text"] or "",
+        source_lang=r["source_lang"],
+        target_lang=r["target_lang"],
+        domain=r["domain"] or "",
+        confidence_score=conf,
+        source_url=r["source_url"] or "",
+        similarity=round(ratio, 4),
+        match_kind=kind,
+        tm_purity_score=round(purity, 4),
+    )
+
+
+def lookup_exact(
+    source_text: str,
+    source_lang: str,
+    target_lang: str,
+    *,
+    db_path: Path | None = None,
+) -> TMMatch | None:
+    """按归一化原文精确命中（索引查询，避免全表扫描）。"""
+    query = (source_text or "").strip()
+    if not query:
+        return None
+    src_store = normalize_source_for_storage(query, source_lang)
+    conn = _connect(db_path)
+    row = conn.execute(
+        """
+        SELECT source_text, target_text, source_lang, target_lang,
+               domain, confidence_score, source_url, tm_purity_score
+        FROM translation_memory
+        WHERE source_lang = ? AND target_lang = ? AND source_text = ?
+        LIMIT 1
+        """,
+        (source_lang, target_lang, src_store),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return _match_from_row(row, ratio=1.0)
 
 
 def lookup_similar(
@@ -194,6 +431,11 @@ def lookup_similar(
     query = (source_text or "").strip()
     if not query:
         return []
+
+    exact = lookup_exact(source_text, source_lang, target_lang, db_path=db_path)
+    if exact is not None and exact.similarity >= min_ratio:
+        return [exact]
+
     conn = _connect(db_path)
     rows = conn.execute(
         """
@@ -201,45 +443,38 @@ def lookup_similar(
                domain, confidence_score, source_url, tm_purity_score
         FROM translation_memory
         WHERE source_lang = ? AND target_lang = ?
+        ORDER BY id DESC
+        LIMIT ?
         """,
-        (source_lang, target_lang),
+        (source_lang, target_lang, _fuzzy_scan_limit()),
     ).fetchall()
     conn.close()
 
     q_len = len(query)
+    q_store = normalize_source_for_storage(query, source_lang)
     scored: list[tuple[float, TMMatch]] = []
     for r in rows:
         src = (r["source_text"] or "").strip()
         if not src:
             continue
-        sl = len(src)
-        lr = sl / q_len if sl > q_len else q_len / sl
-        if lr > 2.2 and src != query:
-            continue
-        ratio = _similarity(query, src)
-        if ratio < min_ratio:
-            continue
-        kind = "exact" if ratio >= 0.999 else "fuzzy"
+        if src == q_store:
+            ratio = 1.0
+        else:
+            sl = len(src)
+            lr = sl / q_len if sl > q_len else q_len / sl
+            if lr > 2.2:
+                continue
+            ratio = _similarity(query, src)
+            if ratio < min_ratio:
+                continue
         purity = float(r["tm_purity_score"] or 0.75)
         conf = float(r["confidence_score"] or 0.8)
-        # 低纯度降权：purity<0.55 几乎不可用
         purity_weight = max(0.15, min(1.0, purity))
         combined = ratio * conf * purity_weight
         scored.append(
             (
                 combined,
-                TMMatch(
-                    source_text=src,
-                    target_text=r["target_text"] or "",
-                    source_lang=r["source_lang"],
-                    target_lang=r["target_lang"],
-                    domain=r["domain"] or "",
-                    confidence_score=conf,
-                    source_url=r["source_url"] or "",
-                    similarity=round(ratio, 4),
-                    match_kind=kind,
-                    tm_purity_score=round(purity, 4),
-                ),
+                _match_from_row(r, ratio=ratio),
             )
         )
     scored.sort(key=lambda x: (-x[0], -x[1].similarity))

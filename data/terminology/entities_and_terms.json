@@ -509,7 +509,9 @@
       },
       {
         "lemma": "ООН",
-        "zh": "联合国"
+        "zh": "联合国",
+        "locked": true,
+        "priority": "locked"
       },
       {
         "lemma": "ЕС",
@@ -564,6 +566,24 @@
           "окне",
           "окон"
         ]
+      },
+      {
+        "lemma": "Организация Объединённых Наций",
+        "zh": "联合国",
+        "locked": true,
+        "priority": "locked"
+      },
+      {
+        "lemma": "ВОЗ",
+        "zh": "世界卫生组织",
+        "locked": true,
+        "priority": "locked"
+      },
+      {
+        "lemma": "Антониу Гутерриш",
+        "zh": "古特雷斯",
+        "locked": true,
+        "priority": "locked"
       }
     ],
     "military": [
@@ -1111,7 +1131,9 @@
       },
       {
         "lemma": "Україна",
-        "zh": "乌克兰"
+        "zh": "乌克兰",
+        "locked": true,
+        "priority": "locked"
       },
       {
         "lemma": "Росія",
@@ -1123,7 +1145,9 @@
       },
       {
         "lemma": "НАТО",
-        "zh": "北约"
+        "zh": "北约",
+        "locked": true,
+        "priority": "locked"
       },
       {
         "lemma": "ООН",
@@ -1192,6 +1216,12 @@
           "вікні",
           "вікон"
         ]
+      },
+      {
+        "lemma": "Збройні Сили України",
+        "zh": "乌克兰武装部队",
+        "locked": true,
+        "priority": "locked"
       }
     ],
     "military": [

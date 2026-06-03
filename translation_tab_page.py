@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 from functools import partial
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from PyQt5.QtCore import (
@@ -13,11 +14,14 @@ from PyQt5.QtCore import (
     QEventLoop,
     QPropertyAnimation,
     Qt,
+    QThread,
     QTimer,
+    pyqtSignal,
 )
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFrame,
     QGraphicsOpacityEffect,
@@ -33,6 +37,7 @@ from PyQt5.QtWidgets import (
 )
 
 from translation_source_edit import SourceTranslationTextEdit
+from segmented_manuscript_panel import SegmentedManuscriptPanel
 
 if TYPE_CHECKING:
     from argostranslategui.gui import GUIWindow
@@ -114,6 +119,31 @@ def _trim_session_text(s: str) -> str:
     return s[:_SESSION_TEXT_LIMIT] + "\n\n[… 超出保存上限，部分内容未写入会话文件 …]"
 
 
+class SegmentedTranslationThread(QThread):
+    """分句模式：在后台逐行翻译。"""
+
+    line_translated = pyqtSignal(int, str)
+
+    def __init__(self, translate_one, lines: list[str], parent=None) -> None:
+        super().__init__(parent)
+        self._translate_one = translate_one
+        self._lines = lines
+
+    def run(self) -> None:
+        for i, line in enumerate(self._lines):
+            raw = line or ""
+            if not raw.strip():
+                self.line_translated.emit(i, "")
+                continue
+            try:
+                self.line_translated.emit(i, self._translate_one(raw))
+            except Exception as e:
+                self.line_translated.emit(
+                    i,
+                    f"[翻译出错] {type(e).__name__}: {e}",
+                )
+
+
 class TranslationTabPage(QWidget):
     """单个翻译标签：独立输入设置，不与其他标签共享语音会话或翻译队列。"""
 
@@ -132,6 +162,7 @@ class TranslationTabPage(QWidget):
 
         self.worker_thread = None
         self.queued_translation = None
+        self._translate_reschedule = False
         self._translate_seq = 0
         self._offline_speech_worker = None
         self._vosk_download_worker = None
@@ -165,11 +196,24 @@ class TranslationTabPage(QWidget):
         self._restore_right_code = ""
         self._lang_combo_order: list[int] = []
         self._lang_combo_base_font: QFont | None = None
+        self._auto_review_queued: set[str] = set()
+        self._target_postprocess_done = False
+        self._segmented_mode = False
+        self._segmented_worker = None
+        self._segmented_translate_seq = 0
+        self._src_placeholder_normal = ""
 
         root = host._portable_root
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
+
+        self._chk_segmented = QCheckBox("分句稿件")
+        self._chk_segmented.setToolTip(
+            "每行原文与译文对齐；在原文框按 Enter 换到下一句，"
+            "每行右侧可「采纳为 TM」"
+        )
+        self._chk_segmented.toggled.connect(self._toggle_segmented_mode)
 
         lang_bar = QFrame()
         lang_bar.setObjectName("LangBar")
@@ -182,30 +226,37 @@ class TranslationTabPage(QWidget):
         self.right_language_combo.currentIndexChanged.connect(self._on_lang_combo_changed)
         self.language_swap_button.clicked.connect(self.swap_languages_button_clicked)
         self._populate_lang_row(lang_row)
+        lang_row.addWidget(self._chk_segmented)
         layout.addWidget(lang_bar)
 
         self.left_textEdit = SourceTranslationTextEdit()
+        from translation_source_edit import TargetTranslationTextEdit
         from argostranslategui.gui import _fast_startup_enabled
 
         if root is not None and _fast_startup_enabled():
             _src_ph = "在此输入要翻译的原文"
         else:
             _src_ph = "在此输入要翻译的原文（Ctrl+Shift+V 仅粘贴纯文本）"
+        self._src_placeholder_normal = _src_ph
         self.left_textEdit.setPlaceholderText(_src_ph)
         self._translate_debounce = QTimer(self)
         self._translate_debounce.setSingleShot(True)
         self._translate_debounce.setInterval(200)
         self._translate_debounce.timeout.connect(self.translate)
-        self.left_textEdit.textChanged.connect(self._update_char_counts)
+        self._char_count_debounce = QTimer(self)
+        self._char_count_debounce.setSingleShot(True)
+        self._char_count_debounce.setInterval(180)
+        self._char_count_debounce.timeout.connect(self._flush_char_counts)
+        self.left_textEdit.textChanged.connect(self._schedule_char_count_update)
         self.left_textEdit.textChanged.connect(self._schedule_translate_debounce)
 
-        self.right_textEdit = QTextEdit()
+        self.right_textEdit = TargetTranslationTextEdit()
         if root is not None and _fast_startup_enabled():
             _tgt_ph = "译文"
         else:
-            _tgt_ph = "译文将显示在此处"
+            _tgt_ph = "译文（粘贴时仅写入纯文本，可 Ctrl+V）"
         self.right_textEdit.setPlaceholderText(_tgt_ph)
-        self.right_textEdit.textChanged.connect(self._update_char_counts)
+        self.right_textEdit.textChanged.connect(self._schedule_char_count_update)
 
         self._src_count_label = QLabel("0 字符")
         self._src_count_label.setObjectName("CharCount")
@@ -220,42 +271,90 @@ class TranslationTabPage(QWidget):
         btn_copy_tgt = QPushButton("复制译文")
         btn_copy_tgt.setObjectName("TextAction")
         btn_copy_tgt.clicked.connect(self._copy_target_text)
+        btn_adopt_tm = QPushButton("采纳为 TM")
+        btn_adopt_tm.setObjectName("TextAction")
+        btn_adopt_tm.setToolTip(
+            "将当前原文与译文直接写入本机 TM 与 gold 语料（无需再审）"
+        )
+        btn_adopt_tm.clicked.connect(self._adopt_translation_as_tm)
+        self._btn_adopt_tm = btn_adopt_tm
+        btn_view_tm = QPushButton("查看 TM")
+        btn_view_tm.setObjectName("TextAction")
+        btn_view_tm.setToolTip("浏览、导入、导出本机翻译记忆库")
+        btn_view_tm.clicked.connect(self._open_tm_viewer_dialog)
+
+        self._feedback_label = QLabel("")
+        self._feedback_label.setObjectName("CharCount")
 
         left_col = QWidget()
+        self._left_col = left_col
         left_col_layout = QVBoxLayout(left_col)
         left_col_layout.setContentsMargins(0, 0, 0, 0)
         left_col_layout.setSpacing(8)
         left_col_layout.addWidget(self.left_textEdit)
         self._left_col_layout = left_col_layout
-        src_footer = QHBoxLayout()
-        src_footer.addWidget(self._src_count_label)
-        src_footer.addStretch()
-        src_footer.addWidget(btn_clear_src)
-        self._src_footer_layout = src_footer
-        left_col_layout.addLayout(src_footer)
         if root is not None and _fast_startup_enabled():
             QTimer.singleShot(900, self._deferred_init_speech_controls)
         elif root is not None:
             self._init_speech_controls()
 
         right_col = QWidget()
+        self._right_col = right_col
         right_col_layout = QVBoxLayout(right_col)
         right_col_layout.setContentsMargins(0, 0, 0, 0)
         right_col_layout.setSpacing(8)
         right_col_layout.addWidget(self.right_textEdit)
-        tgt_footer = QHBoxLayout()
-        tgt_footer.addWidget(self._tgt_count_label)
-        tgt_footer.addStretch()
-        tgt_footer.addWidget(btn_copy_tgt)
-        tgt_footer.addWidget(btn_clear_tgt)
-        right_col_layout.addLayout(tgt_footer)
+
+        self._segmented_panel = SegmentedManuscriptPanel()
+        self._segmented_panel.set_adopt_handler(self._adopt_segmented_line_as_tm)
+        self._segmented_panel.set_source_changed_handler(
+            self._on_segmented_source_changed
+        )
+        self._segmented_panel.set_target_changed_handler(
+            self._schedule_char_count_update
+        )
+        self._segmented_wrap = QWidget()
+        seg_wrap_l = QVBoxLayout(self._segmented_wrap)
+        seg_wrap_l.setContentsMargins(0, 0, 0, 0)
+        seg_wrap_l.setSpacing(0)
+        seg_wrap_l.addWidget(self._segmented_panel, 1)
+        self._segmented_wrap.setVisible(False)
+
+        self._bottom_bar = QWidget()
+        bottom_l = QHBoxLayout(self._bottom_bar)
+        bottom_l.setContentsMargins(0, 0, 0, 0)
+        self._bottom_bar_layout = bottom_l
+        bottom_l.addWidget(self._src_count_label)
+        bottom_l.addWidget(btn_clear_src)
+        bottom_l.addStretch()
+        bottom_l.addWidget(self._tgt_count_label)
+        bottom_l.addWidget(self._feedback_label, 1)
+        bottom_l.addStretch()
+        bottom_l.addWidget(btn_view_tm)
+        bottom_l.addWidget(btn_adopt_tm)
+        bottom_l.addWidget(btn_copy_tgt)
+        bottom_l.addWidget(btn_clear_tgt)
+
+        self._editors_row = QWidget()
+        editors_l = QHBoxLayout(self._editors_row)
+        editors_l.setContentsMargins(0, 0, 0, 0)
+        editors_l.setSpacing(12)
+        editors_l.addWidget(left_col, 1)
+        editors_l.addWidget(right_col, 1)
+
+        self._translate_body = QWidget()
+        body_l = QVBoxLayout(self._translate_body)
+        body_l.setContentsMargins(0, 0, 0, 0)
+        body_l.setSpacing(8)
+        body_l.addWidget(self._editors_row, 1)
+        body_l.addWidget(self._segmented_wrap, 1)
+        body_l.addWidget(self._bottom_bar)
 
         self._translation_pair = QWidget()
         tp_l = QHBoxLayout(self._translation_pair)
         tp_l.setContentsMargins(0, 0, 0, 0)
         tp_l.setSpacing(12)
-        tp_l.addWidget(left_col, 1)
-        tp_l.addWidget(right_col, 1)
+        tp_l.addWidget(self._translate_body, 1)
 
         self._lookup_slot = QWidget()
         self._lookup_slot.setObjectName("WordLookupSlot")
@@ -285,6 +384,7 @@ class TranslationTabPage(QWidget):
         self.language_swap_button.setObjectName("SwapButton")
         self.left_textEdit.setMinimumHeight(200)
         self.right_textEdit.setMinimumHeight(200)
+        self._segmented_wrap.setMinimumHeight(200)
         self._update_char_counts()
 
     def _attach_word_lookup_panel(self, panel: QWidget) -> None:
@@ -418,11 +518,20 @@ class TranslationTabPage(QWidget):
         lc = (getattr(L, "code", None) or "").strip().lower() if L else ""
         rc = (getattr(R, "code", None) or "").strip().lower() if R else ""
         return {
-            "source_text": _trim_session_text(self.left_textEdit.toPlainText()),
-            "target_text": _trim_session_text(self.right_textEdit.toPlainText()),
+            "source_text": _trim_session_text(
+                self._segmented_panel.joined_source_text()
+                if self._segmented_mode
+                else self.left_textEdit.toPlainText()
+            ),
+            "target_text": _trim_session_text(
+                self._segmented_panel.joined_target_text()
+                if self._segmented_mode
+                else self.right_textEdit.toPlainText()
+            ),
             "left_lang_code": lc,
             "right_lang_code": rc,
             "speech_prefs": copy.deepcopy(self._get_speech_audio_prefs()),
+            "segmented_mode": self._segmented_mode,
         }
 
     def apply_session_state(self, state: dict[str, Any]) -> None:
@@ -439,9 +548,30 @@ class TranslationTabPage(QWidget):
         self.left_textEdit.blockSignals(True)
         self.left_textEdit.setPlainText(src if isinstance(src, str) else "")
         self.left_textEdit.blockSignals(False)
-        self.right_textEdit.blockSignals(True)
-        self.right_textEdit.setPlainText(tgt if isinstance(tgt, str) else "")
-        self.right_textEdit.blockSignals(False)
+        segmented = bool(state.get("segmented_mode"))
+        self._chk_segmented.blockSignals(True)
+        self._chk_segmented.setChecked(segmented)
+        self._chk_segmented.blockSignals(False)
+        self._apply_segmented_mode_ui(segmented, migrate_targets=False)
+        if segmented:
+            src_lines = (src if isinstance(src, str) else "").split("\n")
+            if not src_lines:
+                src_lines = [""]
+            tgt_lines = (tgt if isinstance(tgt, str) else "").split("\n")
+            if len(tgt_lines) < len(src_lines):
+                tgt_lines.extend([""] * (len(src_lines) - len(tgt_lines)))
+            self._segmented_panel.set_all_rows(
+                src_lines,
+                tgt_lines[: len(src_lines)],
+            )
+            self._sync_hidden_source_from_panel()
+            self.right_textEdit.blockSignals(True)
+            self.right_textEdit.setPlainText("")
+            self.right_textEdit.blockSignals(False)
+        else:
+            self.right_textEdit.blockSignals(True)
+            self.right_textEdit.setPlainText(tgt if isinstance(tgt, str) else "")
+            self.right_textEdit.blockSignals(False)
         sp = state.get("speech_prefs")
         if isinstance(sp, dict):
             self._speech_prefs = copy.deepcopy(sp)
@@ -548,7 +678,7 @@ class TranslationTabPage(QWidget):
                 bm=bm,
             )
 
-        return aqg.ensure_quality(
+        out = aqg.ensure_quality(
             result,
             source_text,
             from_code,
@@ -556,16 +686,247 @@ class TranslationTabPage(QWidget):
             translation,
             prepare_fn=prepare,
         )
+        try:
+            from slavic_translation_hints import is_zh_to_slavic
 
-    def _schedule_translate_debounce(self) -> None:
+            if is_zh_to_slavic(from_code, to_code):
+                self._target_postprocess_done = True
+        except ImportError:
+            pass
+        return out
+
+    def _translate_in_worker(
+        self,
+        input_text_raw: str,
+        fc: str,
+        tc: str,
+        translation,
+        *,
+        tb,
+        bm,
+        use_glossary: bool,
+    ) -> str:
+        """在后台线程执行 TM 查询、预处理、Argos 翻译与质量守卫。"""
+        from argostranslategui.gui import (
+            _import_translation_quality_module,
+            _is_zh_family_source,
+        )
+
+        try:
+            import translation_memory as tm
+
+            tm_ratio = None
+            if (fc or "").strip().lower() in ("zh", "zt", "cn"):
+                import os
+
+                tm_ratio = float(os.environ.get("ARGOS_TM_MIN_RATIO_ZH", "0.90"))
+            tm_hit = tm.lookup(
+                input_text_raw,
+                fc,
+                tc,
+                min_ratio=tm_ratio,
+            )
+            if tm_hit is not None:
+                tm.append_hit_log(tm_hit, query=input_text_raw)
+                self._target_postprocess_done = True
+                return tm_hit.target_text
+        except ImportError:
+            pass
+
+        tq = _import_translation_quality_module()
+        if tq is not None and hasattr(tq, "sanitize_source_text"):
+            input_text_raw = tq.sanitize_source_text(
+                input_text_raw, for_llm=False
+            )
+        source_snapshot = input_text_raw
+        zh_family = (
+            tb.is_chinese_source_language(fc)
+            if tb is not None and hasattr(tb, "is_chinese_source_language")
+            else _is_zh_family_source(fc)
+        )
+        tgt_code = (tc or "").strip().lower()
+        if zh_family:
+            try:
+                import slavic_translation_enhance as ste
+
+                input_text_raw = ste.prepare_argos_source(
+                    input_text_raw,
+                    fc,
+                    tc,
+                )
+            except ImportError:
+                if tq is not None and tgt_code in ("ru", "uk") and hasattr(
+                    tq, "prepare_zh_for_cyrillic_target"
+                ):
+                    input_text_raw = tq.prepare_zh_for_cyrillic_target(
+                        input_text_raw, tgt_code
+                    )
+                elif tq is not None:
+                    input_text_raw = tq.normalize_zh_for_mt(input_text_raw)
+            if bm is not None:
+                input_text_raw = bm.prepare_long_translation_input(
+                    input_text_raw, for_llm=False
+                )
+        try:
+            import slavic_translation_enhance as ste
+
+            ste.apply_argos_inference_tuning(input_text_raw, fc, tc)
+        except ImportError:
+            try:
+                import argos_inference_tuning as ait
+
+                ait.apply_for_input(input_text_raw)
+            except Exception:
+                pass
+
+        if use_glossary:
+            raw = tb.apply_glossary(
+                translation,
+                input_text_raw,
+                fc,
+                tc,
+            )
+        else:
+            prep = self._prepare_argos_translate_input(
+                input_text_raw, fc, tc, tb=tb, bm=bm
+            )
+            raw = translation.translate(prep)
+        return self._apply_quality_guard(
+            raw,
+            source_snapshot,
+            fc,
+            tc,
+            translation,
+            tb=tb,
+            bm=bm,
+        )
+
+    def _schedule_char_count_update(self) -> None:
+        self._char_count_debounce.start()
+
+    def _doc_char_count(self, edit) -> int:
+        doc = edit.document()
+        if doc is None:
+            return len(edit.toPlainText())
+        return max(0, doc.characterCount() - 1)
+
+    def _flush_char_counts(self) -> None:
+        if self._segmented_mode:
+            line_n = self._segmented_panel.row_count()
+            src_chars = self._segmented_panel.total_source_char_count()
+            tgt_chars = self._segmented_panel.total_target_char_count()
+            self._src_count_label.setText(f"{line_n} 行 · {src_chars} 字符")
+            self._tgt_count_label.setText(f"{tgt_chars} 字符")
+        else:
+            src_chars = self._doc_char_count(self.left_textEdit)
+            self._src_count_label.setText(f"{src_chars} 字符")
+            self._tgt_count_label.setText(
+                f"{self._doc_char_count(self.right_textEdit)} 字符"
+            )
+
+    def _update_char_counts(self) -> None:
+        self._flush_char_counts()
+
+    def _source_text_lines(self) -> list[str]:
+        if self._segmented_mode:
+            return self._segmented_panel.get_source_lines()
+        text = self.left_textEdit.toPlainText() or ""
+        if not text:
+            return []
+        return text.split("\n")
+
+    def _sync_hidden_source_from_panel(self) -> None:
+        joined = self._segmented_panel.joined_source_text()
+        self.left_textEdit.blockSignals(True)
+        self.left_textEdit.setPlainText(joined)
+        self.left_textEdit.blockSignals(False)
+
+    def _on_segmented_source_changed(self) -> None:
+        self._sync_hidden_source_from_panel()
+        self._schedule_char_count_update()
+        self._schedule_segmented_translate_debounce()
+
+    def _schedule_segmented_translate_debounce(self) -> None:
+        lines = self._segmented_panel.get_source_lines()
+        chars = sum(len(ln) for ln in lines)
+        blocks = max(1, len(lines))
         try:
             import argos_inference_tuning as ait
 
-            ms = ait.debounce_ms_for_text(self.left_textEdit.toPlainText())
+            ms = ait.debounce_ms_for_char_count(chars, block_count=blocks)
         except Exception:
-            ms = 200
+            ms = 600
         self._translate_debounce.setInterval(ms)
         self._translate_debounce.start()
+        if (
+            self._segmented_worker is not None
+            and self._segmented_worker.isRunning()
+        ):
+            self._translate_reschedule = True
+
+    def _toggle_segmented_mode(self, enabled: bool) -> None:
+        if bool(enabled) == self._segmented_mode:
+            return
+        self._apply_segmented_mode_ui(bool(enabled))
+        self.translate()
+
+    def _apply_segmented_mode_ui(
+        self, enabled: bool, *, migrate_targets: bool = True
+    ) -> None:
+        self._segmented_mode = bool(enabled)
+        self._editors_row.setVisible(not enabled)
+        self._segmented_wrap.setVisible(enabled)
+        self._btn_adopt_tm.setVisible(not enabled)
+        if enabled:
+            if migrate_targets:
+                src_text = self.left_textEdit.toPlainText() or ""
+                src_lines = src_text.split("\n") if src_text else [""]
+                tgt_lines = self.right_textEdit.toPlainText().split("\n")
+                if tgt_lines == [""]:
+                    tgt_lines = []
+                if not tgt_lines:
+                    self._segmented_panel.set_all_rows(src_lines, [""] * len(src_lines))
+                elif len(tgt_lines) == len(src_lines):
+                    self._segmented_panel.set_all_rows(src_lines, tgt_lines)
+                else:
+                    self._segmented_panel.set_all_rows(src_lines)
+            else:
+                self._segmented_panel.ensure_min_rows(1)
+            self._sync_hidden_source_from_panel()
+        else:
+            self._sync_hidden_source_from_panel()
+            if migrate_targets:
+                self.left_textEdit.setPlainText(
+                    self._segmented_panel.joined_source_text()
+                )
+                self.right_textEdit.setPlainText(
+                    self._segmented_panel.joined_target_text()
+                )
+        self._update_char_counts()
+        if enabled:
+            QTimer.singleShot(50, self._segmented_panel.refresh_row_heights)
+
+    def _schedule_translate_debounce(self) -> None:
+        if self._segmented_mode:
+            return
+        doc = self.left_textEdit.document()
+        chars = self._doc_char_count(self.left_textEdit)
+        blocks = doc.blockCount() if doc is not None else 1
+        try:
+            import argos_inference_tuning as ait
+
+            ms = ait.debounce_ms_for_char_count(chars, block_count=blocks)
+        except Exception:
+            ms = 450
+        self._translate_debounce.setInterval(ms)
+        self._translate_debounce.start()
+        if self.worker_thread is not None and self.worker_thread.isRunning():
+            self._translate_reschedule = True
+        if (
+            self._segmented_worker is not None
+            and self._segmented_worker.isRunning()
+        ):
+            self._translate_reschedule = True
 
     def _warmup_current_language_pair(self) -> None:
         if not self.languages:
@@ -612,6 +973,8 @@ class TranslationTabPage(QWidget):
         self._stop_speech_worker(wait_ms=3000)
         if self.worker_thread is not None and self.worker_thread.isRunning():
             self.worker_thread.wait(2000)
+        if self._segmented_worker is not None and self._segmented_worker.isRunning():
+            self._segmented_worker.wait(2000)
 
     def on_tab_deactivated(self) -> None:
         w = self._offline_speech_worker
@@ -779,9 +1142,9 @@ class TranslationTabPage(QWidget):
         self._speech_audio_bar = panel_l
         if self._left_col_layout is not None:
             self._left_col_layout.insertWidget(1, self._speech_settings_panel)
-        if self._src_footer_layout is not None:
-            self._src_footer_layout.insertWidget(1, self._btn_speech_settings)
-            self._src_footer_layout.insertWidget(2, self._btn_offline_speech)
+        if self._bottom_bar_layout is not None:
+            self._bottom_bar_layout.insertWidget(1, self._btn_offline_speech)
+            self._bottom_bar_layout.insertWidget(1, self._btn_speech_settings)
         for combo in (self._speech_input_combo, self._speech_output_combo):
             combo.blockSignals(True)
             combo.addItem("（正在加载设备…）", {"index": None, "name": ""})
@@ -817,10 +1180,10 @@ class TranslationTabPage(QWidget):
         new.setPlaceholderText(old.placeholderText())
         new.setMinimumHeight(old.minimumHeight())
         if attr == "left_textEdit":
-            new.textChanged.connect(self._update_char_counts)
+            new.textChanged.connect(self._schedule_char_count_update)
             new.textChanged.connect(self._schedule_translate_debounce)
         else:
-            new.textChanged.connect(self._update_char_counts)
+            new.textChanged.connect(self._schedule_char_count_update)
         parent = old.parentWidget()
         if parent is not None and parent.layout() is not None:
             lay = parent.layout()
@@ -860,34 +1223,191 @@ class TranslationTabPage(QWidget):
         self._upgrade_word_lookup_text_edits()
         self._word_lookup_upgraded = True
 
-    def _update_char_counts(self) -> None:
-        self._src_count_label.setText(f"{len(self.left_textEdit.toPlainText())} 字符")
-        self._tgt_count_label.setText(f"{len(self.right_textEdit.toPlainText())} 字符")
-
     def _clear_source_text(self) -> None:
         self._snapshot_translation_history_if_voice_session()
-        self.left_textEdit.blockSignals(True)
-        self.left_textEdit.setPlainText("")
-        self.left_textEdit.blockSignals(False)
+        if self._segmented_mode:
+            self._segmented_panel.clear_all()
+            self._sync_hidden_source_from_panel()
+        else:
+            self.left_textEdit.blockSignals(True)
+            self.left_textEdit.setPlainText("")
+            self.left_textEdit.blockSignals(False)
         self._update_char_counts()
         self.translate()
 
     def _clear_target_text(self) -> None:
-        self.right_textEdit.blockSignals(True)
-        self.right_textEdit.setPlainText("")
-        self.right_textEdit.blockSignals(False)
+        if self._segmented_mode:
+            self._segmented_panel.clear_targets()
+        else:
+            self.right_textEdit.blockSignals(True)
+            self.right_textEdit.setPlainText("")
+            self.right_textEdit.blockSignals(False)
         self._update_char_counts()
 
     def _cancel_pending_translation(self) -> None:
         """原文已空或需重置时：停止去抖定时器并丢弃排队/进行中的译稿回写。"""
         self._translate_debounce.stop()
-        self.worker_thread = None
+        self._translate_seq += 1
+        self._segmented_translate_seq += 1
+        self._translate_reschedule = False
         self.queued_translation = None
+        self._set_feedback_message("")
 
     def _copy_target_text(self) -> None:
         from PyQt5.QtWidgets import QApplication
 
-        QApplication.clipboard().setText(self.right_textEdit.toPlainText())
+        text = (
+            self._segmented_panel.joined_target_text()
+            if self._segmented_mode
+            else self.right_textEdit.toPlainText()
+        )
+        QApplication.clipboard().setText(text)
+
+    def _set_feedback_message(self, message: str) -> None:
+        msg = (message or "").strip()
+        if hasattr(self, "_feedback_label") and self._feedback_label is not None:
+            self._feedback_label.setText(msg)
+
+    def _adopt_translation_as_tm(self) -> None:
+        src = (self.left_textEdit.toPlainText() or "").strip()
+        tgt = (self.right_textEdit.toPlainText() or "").strip()
+        if not src or not tgt:
+            QMessageBox.information(self, "采纳为 TM", "请先填写原文和译文。")
+            return
+        if tgt.startswith("[") and "翻译" in tgt[:24]:
+            QMessageBox.information(self, "采纳为 TM", "请等待翻译完成或编辑有效译文。")
+            return
+        L = self._language_at_combo_index(self.left_language_combo.currentIndex())
+        R = self._language_at_combo_index(self.right_language_combo.currentIndex())
+        if L is None or R is None:
+            return
+        r = QMessageBox.question(
+            self,
+            "采纳为 TM",
+            "将当前句对直接写入本机 TM 与 gold 语料。\n"
+            "相同原文已存在时将跳过重复句对。\n\n"
+            "是否继续？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if r != QMessageBox.Yes:
+            return
+        self._adopt_pair_as_tm(src, tgt, L.code, R.code, show_dialog=True)
+
+    def _adopt_segmented_line_as_tm(self, index: int) -> None:
+        src = self._segmented_panel.source_line_for(index)
+        tgt = self._segmented_panel.target_line_for(index)
+        if not src:
+            QMessageBox.information(self, "采纳为 TM", "该行原文为空。")
+            return
+        if not tgt:
+            QMessageBox.information(self, "采纳为 TM", "请先填写或等待该行译文。")
+            return
+        if tgt.startswith("[") and "翻译" in tgt[:24]:
+            QMessageBox.information(self, "采纳为 TM", "请等待翻译完成或编辑有效译文。")
+            return
+        L = self._language_at_combo_index(self.left_language_combo.currentIndex())
+        R = self._language_at_combo_index(self.right_language_combo.currentIndex())
+        if L is None or R is None:
+            return
+        self._adopt_pair_as_tm(
+            src,
+            tgt,
+            L.code,
+            R.code,
+            show_dialog=False,
+            line_hint=index + 1,
+        )
+
+    def _adopt_pair_as_tm(
+        self,
+        src: str,
+        tgt: str,
+        from_code: str,
+        to_code: str,
+        *,
+        show_dialog: bool,
+        line_hint: int | None = None,
+    ) -> None:
+        try:
+            from corpus_pipeline.user_feedback import adopt_user_translation
+        except ImportError:
+            QMessageBox.warning(self, "采纳为 TM", "语料模块未就绪。")
+            return
+        result = adopt_user_translation(
+            src,
+            tgt,
+            from_code,
+            to_code,
+            origin="ui_adopt",
+        )
+        if result.get("ok"):
+            added = int(result.get("tm_added") or 0)
+            skipped = int(result.get("tm_skipped") or 0)
+            prefix = f"第 {line_hint} 行 " if line_hint else ""
+            self._set_feedback_message(f"{prefix}TM +{added}（跳过 {skipped}）")
+            if show_dialog:
+                QMessageBox.information(
+                    self,
+                    "采纳为 TM",
+                    f"已写入本机 TM。\n"
+                    f"新增 {added} 条，跳过 {skipped} 条（重复或已存在）。\n\n"
+                    "可在「查看 TM」中浏览。",
+                )
+        else:
+            reason = result.get("reason") or "unknown"
+            title = f"采纳为 TM" + (f"（第 {line_hint} 行）" if line_hint else "")
+            QMessageBox.warning(self, title, f"写入失败：{reason}")
+
+    def _maybe_auto_enqueue_low_quality(
+        self,
+        source_text: str,
+        target_text: str,
+        from_code: str,
+        to_code: str,
+    ) -> None:
+        try:
+            from corpus_pipeline.user_feedback import (
+                enqueue_low_quality_translation,
+                pair_id,
+            )
+        except ImportError:
+            return
+        src = (source_text or "").strip()
+        tgt = (target_text or "").strip()
+        if not src or not tgt or tgt.startswith("["):
+            return
+        pid = pair_id(src, from_code, to_code)
+        if pid in self._auto_review_queued:
+            return
+        result = enqueue_low_quality_translation(
+            src,
+            tgt,
+            from_code,
+            to_code,
+            trigger="auto_translate",
+        )
+        if result.get("ok"):
+            self._auto_review_queued.add(pid)
+            reason = result.get("auto_reason") or "low_quality"
+            self._set_feedback_message(f"低分已入审核（{reason}）")
+
+    def _current_lang_codes(self) -> tuple[str, str] | None:
+        L = self._language_at_combo_index(self.left_language_combo.currentIndex())
+        R = self._language_at_combo_index(self.right_language_combo.currentIndex())
+        if L is None or R is None:
+            return None
+        return (L.code or "").strip(), (R.code or "").strip()
+
+    def _open_tm_viewer_dialog(self) -> None:
+        codes = self._current_lang_codes()
+        sl, tl = codes if codes else ("", "")
+        try:
+            from tm_viewer_dialog import open_tm_viewer_dialog
+        except ImportError:
+            QMessageBox.warning(self, "查看 TM", "TM 查看模块未就绪。")
+            return
+        open_tm_viewer_dialog(self, source_lang=sl, target_lang=tl)
 
     def swap_languages_button_clicked(self) -> None:
         self._pulse_swap_button()
@@ -1010,13 +1530,197 @@ class TranslationTabPage(QWidget):
         anim.setEasingCurve(QEasingCurve.InOutQuad)
         anim.start(QAbstractAnimation.DeleteWhenStopped)
 
+    def _postprocess_target_text(self, text: str, source_text: str) -> str:
+        from argostranslategui.gui import _import_translation_quality_module
+
+        t = text or ""
+        tq = _import_translation_quality_module()
+        if tq is None:
+            return t
+        R = self._language_at_combo_index(self.right_language_combo.currentIndex())
+        L = self._language_at_combo_index(self.left_language_combo.currentIndex())
+        src_code = (L.code or "").strip().lower() if L else ""
+        src_plain = source_text or ""
+        if R is None:
+            return t
+        code = (R.code or "").strip().lower()
+        if code in ("zh", "zt", "cn") and src_code in ("ru", "uk"):
+            try:
+                import slavic_to_zh_enhance as stz
+
+                t = stz.postprocess_slavic_to_zh(
+                    t, src_code, source_text=src_plain
+                )
+                try:
+                    from corpus_pipeline.glossary_coverage import (
+                        measure_slavic_to_zh,
+                    )
+
+                    measure_slavic_to_zh(src_plain, t, src_code)
+                except ImportError:
+                    pass
+            except ImportError:
+                pass
+        if code in ("ru", "uk"):
+            skip_heavy = (
+                getattr(self, "_target_postprocess_done", False)
+                and src_code in ("zh", "zt", "cn")
+            )
+            if skip_heavy:
+                self._target_postprocess_done = False
+                if hasattr(tq, "touchup_cyrillic_target_spacing"):
+                    t = tq.touchup_cyrillic_target_spacing(t)
+            else:
+                try:
+                    import slavic_translation_enhance as ste
+
+                    t = ste.postprocess_argos_target(
+                        t,
+                        src_code,
+                        code,
+                        source_text=src_plain,
+                    )
+                except ImportError:
+                    if hasattr(tq, "postprocess_translation_target"):
+                        t = tq.postprocess_translation_target(
+                            t,
+                            code,
+                            source_text=src_plain,
+                            source_lang_code=src_code,
+                        )
+                    elif hasattr(tq, "touchup_cyrillic_target_spacing"):
+                        t = tq.touchup_cyrillic_target_spacing(t)
+        return t
+
+    def _translate_segmented(self) -> None:
+        from argostranslategui.gui import (
+            _get_terminology_bridge,
+            _import_bulk_text_module,
+        )
+        from argostranslate.utils import error
+
+        lines = self._source_text_lines()
+        if not lines or not any((ln or "").strip() for ln in lines):
+            self._cancel_pending_translation()
+            self._clear_target_text()
+            return
+        if len(self.languages) < 1:
+            return
+        if (
+            self._segmented_worker is not None
+            and self._segmented_worker.isRunning()
+        ):
+            self._translate_reschedule = True
+            self._set_feedback_message("正在逐句翻译…")
+            return
+        input_language = self._language_at_combo_index(
+            self.left_language_combo.currentIndex()
+        )
+        output_language = self._language_at_combo_index(
+            self.right_language_combo.currentIndex()
+        )
+        if input_language is None or output_language is None:
+            return
+        input_language, output_language, translation = (
+            self._ensure_translation_engine_ready(
+                input_language, output_language
+            )
+        )
+        if not translation:
+            lw = getattr(self._host, "_languages_lightweight", False)
+            err = getattr(self._host, "_lang_load_full_error", "") or ""
+            hint = "[当前语言对没有可用的翻译模型]"
+            if lw:
+                hint = (
+                    "翻译引擎未就绪，无法翻译。\n"
+                    "请完全退出程序（结束 pythonw.exe）后重新运行 run_gui.bat。"
+                )
+            elif err:
+                hint += "\n\n（翻译引擎报错，请见弹窗说明。）"
+            self._segmented_panel.set_all_targets([hint] * len(lines))
+            error("当前语言对没有可用的翻译模型。")
+            return
+
+        tb = _get_terminology_bridge()
+        use_glossary = (
+            tb is not None
+            and hasattr(tb, "should_apply_glossary")
+            and tb.should_apply_glossary(
+                input_language.code, output_language.code
+            )
+        )
+        bm = _import_bulk_text_module()
+        fc = input_language.code
+        tc = output_language.code
+        self._segmented_translate_seq += 1
+        seq = self._segmented_translate_seq
+        self._translate_reschedule = False
+        total = len(lines)
+        self._set_feedback_message(f"正在逐句翻译（0/{total}）…")
+        tab = self
+
+        def translate_one(raw_line: str) -> str:
+            tab._target_postprocess_done = False
+            out = tab._translate_in_worker(
+                raw_line,
+                fc,
+                tc,
+                translation,
+                tb=tb,
+                bm=bm,
+                use_glossary=use_glossary,
+            )
+            return tab._postprocess_target_text(out, raw_line)
+
+        worker = SegmentedTranslationThread(translate_one, lines, self)
+        done = 0
+
+        def _on_line(index: int, text: str, _seq: int = seq) -> None:
+            nonlocal done
+            if _seq != self._segmented_translate_seq:
+                return
+            self._segmented_panel.set_target_line(index, text)
+            if (lines[index] or "").strip():
+                done += 1
+                self._set_feedback_message(f"正在逐句翻译（{done}/{total}）…")
+                src_line = (lines[index] or "").strip()
+                tgt_line = (text or "").strip()
+
+                def _auto_review() -> None:
+                    if _seq != self._segmented_translate_seq:
+                        return
+                    self._maybe_auto_enqueue_low_quality(
+                        src_line,
+                        tgt_line,
+                        fc,
+                        tc,
+                    )
+
+                QTimer.singleShot(0, _auto_review)
+            self._update_char_counts()
+
+        worker.line_translated.connect(_on_line)
+        worker.finished.connect(self._handle_segmented_worker_finished)
+        self._segmented_worker = worker
+        worker.start()
+
+    def _handle_segmented_worker_finished(self) -> None:
+        self._segmented_worker = None
+        self._maybe_show_uk_morph_install_notice()
+        if self._translate_reschedule:
+            self._translate_reschedule = False
+            QTimer.singleShot(80, self._translate_segmented)
+            return
+        self._set_feedback_message("")
+
     def translate(self) -> None:
+        if self._segmented_mode:
+            self._translate_segmented()
+            return
         from argostranslategui.gui import (
             TranslationThread,
             _get_terminology_bridge,
             _import_bulk_text_module,
-            _import_translation_quality_module,
-            _is_zh_family_source,
         )
         from argostranslate.utils import error
 
@@ -1033,79 +1737,17 @@ class TranslationTabPage(QWidget):
         output_language = self._language_at_combo_index(
             self.right_language_combo.currentIndex()
         )
-        tb = _get_terminology_bridge()
-        if input_language is not None and output_language is not None:
-            try:
-                import translation_memory as tm
-
-                tm_hit = tm.lookup(
-                    input_text_raw,
-                    input_language.code,
-                    output_language.code,
-                )
-                if tm_hit is not None:
-                    tm.append_hit_log(tm_hit, query=input_text_raw)
-                    self._show_translating_status(
-                        tm.format_status_message(tm_hit)
-                    )
-                    self.update_right_textEdit(tm_hit.target_text)
-                    return
-            except ImportError:
-                pass
-        tq = _import_translation_quality_module()
-        if tq is not None and hasattr(tq, "sanitize_source_text"):
-            input_text_raw = tq.sanitize_source_text(
-                input_text_raw, for_llm=False
-            )
-        zh_family = (
-            tb.is_chinese_source_language(input_language.code)
-            if tb is not None and hasattr(tb, "is_chinese_source_language")
-            else _is_zh_family_source(input_language.code)
-        )
-        tgt_code = (output_language.code or "").strip().lower()
-        if zh_family:
-            try:
-                import slavic_translation_enhance as ste
-
-                input_text_raw = ste.prepare_argos_source(
-                    input_text_raw,
-                    input_language.code,
-                    output_language.code,
-                )
-            except ImportError:
-                if tq is not None and tgt_code in ("ru", "uk") and hasattr(
-                    tq, "prepare_zh_for_cyrillic_target"
-                ):
-                    input_text_raw = tq.prepare_zh_for_cyrillic_target(
-                        input_text_raw, tgt_code
-                    )
-                elif tq is not None:
-                    input_text_raw = tq.normalize_zh_for_mt(input_text_raw)
-            bm = _import_bulk_text_module()
-            if bm is not None:
-                input_text_raw = bm.prepare_long_translation_input(
-                    input_text_raw, for_llm=False
-                )
+        if input_language is None or output_language is None:
+            return
+        if self.worker_thread is not None and self.worker_thread.isRunning():
+            self._translate_reschedule = True
+            self._set_feedback_message("正在翻译…")
+            return
         input_language, output_language, translation = (
             self._ensure_translation_engine_ready(
                 input_language, output_language
             )
         )
-        try:
-            import slavic_translation_enhance as ste
-
-            ste.apply_argos_inference_tuning(
-                input_text_raw,
-                input_language.code,
-                output_language.code,
-            )
-        except ImportError:
-            try:
-                import argos_inference_tuning as ait
-
-                ait.apply_for_input(input_text_raw)
-            except Exception:
-                pass
         if not translation:
             lw = getattr(self._host, "_languages_lightweight", False)
             err = getattr(self._host, "_lang_load_full_error", "") or ""
@@ -1127,6 +1769,7 @@ class TranslationTabPage(QWidget):
                     QTimer.singleShot(0, lambda: handle(err))
             error("当前语言对没有可用的翻译模型。")
             return
+        tb = _get_terminology_bridge()
         use_glossary = (
             tb is not None
             and hasattr(tb, "should_apply_glossary")
@@ -1139,59 +1782,51 @@ class TranslationTabPage(QWidget):
         tc = output_language.code
         source_snapshot = input_text_raw
 
-        if use_glossary:
-
-            def bound() -> str:
-                raw = tb.apply_glossary(
-                    translation,
-                    input_text_raw,
-                    fc,
-                    tc,
-                )
-                return self._apply_quality_guard(
-                    raw,
-                    source_snapshot,
-                    fc,
-                    tc,
-                    translation,
-                    tb=tb,
-                    bm=bm,
-                )
-
-        else:
-            prep = self._prepare_argos_translate_input(
-                input_text_raw, fc, tc, tb=tb, bm=bm
-            )
-
-            def bound() -> str:
-                raw = translation.translate(prep)
-                return self._apply_quality_guard(
-                    raw,
-                    source_snapshot,
-                    fc,
-                    tc,
-                    translation,
-                    tb=tb,
-                    bm=bm,
-                )
-
         self._translate_seq += 1
         seq = self._translate_seq
-        self._show_translating_status("正在翻译…")
-        new_worker = TranslationThread(bound, True)
+        self._target_postprocess_done = False
+        self._translate_reschedule = False
+        self._set_feedback_message("正在翻译…")
+        tab = self
+
+        def bound() -> str:
+            return tab._translate_in_worker(
+                source_snapshot,
+                fc,
+                tc,
+                translation,
+                tb=tb,
+                bm=bm,
+                use_glossary=use_glossary,
+            )
+
+        new_worker = TranslationThread(bound, False)
 
         def _on_translate_update(text: str, _seq: int = seq) -> None:
             if _seq != self._translate_seq:
                 return
+            self._set_feedback_message("")
             self.update_right_textEdit(text)
+            src_snap = source_snapshot
+            fc_snap = fc
+            tc_snap = tc
+
+            def _auto_review() -> None:
+                if _seq != self._translate_seq:
+                    return
+                self._maybe_auto_enqueue_low_quality(
+                    src_snap,
+                    self.right_textEdit.toPlainText(),
+                    fc_snap,
+                    tc_snap,
+                )
+
+            QTimer.singleShot(0, _auto_review)
 
         new_worker.send_text_update.connect(_on_translate_update)
         new_worker.finished.connect(self.handle_worker_thread_finished)
-        if self.worker_thread is None:
-            self.worker_thread = new_worker
-            self.worker_thread.start()
-        else:
-            self.queued_translation = new_worker
+        self.worker_thread = new_worker
+        self.worker_thread.start()
 
     def _show_translating_status(self, message: str = "正在翻译…") -> None:
         """译文区立即显示状态，避免长文本或排队时长时间无反馈。"""
@@ -1202,56 +1837,17 @@ class TranslationTabPage(QWidget):
         self._update_char_counts()
 
     def update_right_textEdit(self, text: str) -> None:
-        from argostranslategui.gui import _import_translation_quality_module
-
+        if self._segmented_mode:
+            return
         if not (self.left_textEdit.toPlainText() or "").strip():
             return
         t = text or ""
-        tq = _import_translation_quality_module()
-        if tq is not None:
-            R = self._language_at_combo_index(self.right_language_combo.currentIndex())
-            L = self._language_at_combo_index(self.left_language_combo.currentIndex())
-            src_code = (L.code or "").strip().lower() if L else ""
-            src_plain = self.left_textEdit.toPlainText() or ""
-            if R is not None:
-                code = (R.code or "").strip().lower()
-                if code in ("zh", "zt", "cn") and src_code in ("ru", "uk"):
-                    try:
-                        import slavic_to_zh_enhance as stz
-
-                        t = stz.postprocess_slavic_to_zh(
-                            t, src_code, source_text=src_plain
-                        )
-                        try:
-                            from corpus_pipeline.glossary_coverage import (
-                                measure_slavic_to_zh,
-                            )
-
-                            measure_slavic_to_zh(src_plain, t, src_code)
-                        except ImportError:
-                            pass
-                    except ImportError:
-                        pass
-                if code in ("ru", "uk"):
-                    try:
-                        import slavic_translation_enhance as ste
-
-                        t = ste.postprocess_argos_target(
-                            t,
-                            src_code,
-                            code,
-                            source_text=src_plain,
-                        )
-                    except ImportError:
-                        if hasattr(tq, "postprocess_translation_target"):
-                            t = tq.postprocess_translation_target(
-                                t,
-                                code,
-                                source_text=src_plain,
-                                source_lang_code=src_code,
-                            )
-                        elif hasattr(tq, "touchup_cyrillic_target_spacing"):
-                            t = tq.touchup_cyrillic_target_spacing(t)
+        if (t or "").strip() in ("正在翻译…", "正在翻译..."):
+            self.right_textEdit.setPlainText(t)
+            self._update_char_counts()
+            return
+        src_plain = self.left_textEdit.toPlainText() or ""
+        t = self._postprocess_target_text(t, src_plain)
         self.right_textEdit.setPlainText(t)
         self._update_char_counts()
         self._maybe_show_uk_morph_install_notice()
@@ -1274,10 +1870,11 @@ class TranslationTabPage(QWidget):
     def handle_worker_thread_finished(self) -> None:
         self.worker_thread = None
         self._maybe_show_uk_morph_install_notice()
-        if self.queued_translation is not None:
-            self.worker_thread = self.queued_translation
-            self.worker_thread.start()
-            self.queued_translation = None
+        if self._translate_reschedule:
+            self._translate_reschedule = False
+            QTimer.singleShot(80, self.translate)
+            return
+        self._set_feedback_message("")
 
     def _speech_combo_device_data(self, combo: QComboBox) -> tuple[Any, str]:
         raw = combo.currentData()

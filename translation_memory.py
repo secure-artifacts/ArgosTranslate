@@ -128,3 +128,135 @@ def format_status_message(hit: TMHit) -> str:
     dom = hit.domain or "语料"
     kind = "精确" if hit.match_kind == "exact" else "模糊"
     return f"TM{kind}命中 {pct}% · {dom}"
+
+
+def export_to_file(
+    path: str | Path,
+    *,
+    source_lang: str | None = None,
+    target_lang: str | None = None,
+) -> dict:
+    """导出本地 TM（json / jsonl / csv）。"""
+    from corpus_pipeline.tm_io import export_tm
+
+    return export_tm(
+        path,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    )
+
+
+def import_from_file(
+    path: str | Path,
+    *,
+    source_lang: str = "",
+    target_lang: str = "",
+    quality_gate: bool = False,
+    bidirectional: bool = True,
+) -> dict:
+    """从本地文件导入 TM。"""
+    from corpus_pipeline.tm_io import import_tm
+
+    return import_tm(
+        path,
+        default_source_lang=source_lang,
+        default_target_lang=target_lang,
+        quality_gate=quality_gate,
+        bidirectional=bidirectional,
+    )
+
+
+def import_batch_from_files(
+    paths: list[str | Path],
+    *,
+    source_lang: str = "",
+    target_lang: str = "",
+    quality_gate: bool = False,
+    bidirectional: bool = True,
+) -> dict:
+    """批量导入本地 TM（多文件 / 目录，按源句去重）。"""
+    from corpus_pipeline.tm_io import import_tm_batch
+
+    return import_tm_batch(
+        paths,
+        default_source_lang=source_lang,
+        default_target_lang=target_lang,
+        quality_gate=quality_gate,
+        bidirectional=bidirectional,
+    )
+
+
+def import_from_table_text(
+    text: str,
+    *,
+    source_lang: str = "",
+    target_lang: str = "",
+    quality_gate: bool = False,
+    bidirectional: bool = True,
+) -> dict:
+    """从 Google 表格等复制的 TSV 文本导入 TM。"""
+    from corpus_pipeline.tm_io import import_tm_from_table_text
+
+    return import_tm_from_table_text(
+        text,
+        default_source_lang=source_lang,
+        default_target_lang=target_lang,
+        quality_gate=quality_gate,
+        bidirectional=bidirectional,
+    )
+
+
+def entry_count() -> int:
+    try:
+        from corpus_pipeline.tm_store import count_entries
+
+        return count_entries()
+    except ImportError:
+        return 0
+
+
+def delete_entries(
+    entries: list[dict],
+    *,
+    delete_reverse: bool = True,
+) -> dict:
+    """从本地 TM 删除指定句对。"""
+    from corpus_pipeline.tm_io import delete_tm
+
+    return delete_tm(entries=entries, delete_reverse=delete_reverse)
+
+
+def list_entries(
+    *,
+    source_lang: str | None = None,
+    target_lang: str | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """列出 TM 条目（供查看器 / 工具）。"""
+    try:
+        from corpus_pipeline.tm_store import iter_entries
+    except ImportError:
+        return []
+    sl = tl = None
+    if source_lang and target_lang:
+        from bidirectional_terminology import lookup_tm_langs
+
+        sl, tl = lookup_tm_langs(source_lang, target_lang)
+    entries = iter_entries(
+        source_lang=sl,
+        target_lang=tl,
+        limit=limit,
+    )
+    return [
+        {
+            "source_text": e.source_text,
+            "target_text": e.target_text,
+            "source_lang": e.source_lang,
+            "target_lang": e.target_lang,
+            "domain": e.domain,
+            "confidence_score": e.confidence_score,
+            "tm_purity_score": e.tm_purity_score,
+            "source_url": e.source_url,
+        }
+        for e in entries
+    ]

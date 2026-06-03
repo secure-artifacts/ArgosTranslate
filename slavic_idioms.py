@@ -155,14 +155,28 @@ _CALQUES_RU: dict[str, list[str]] = {
     "没关系": ["это не имеет отношения", "нет отношения"],
     "不用谢": ["не нужно благодарить", "не надо благодарить"],
     "实际上": ["в действительности", "в реальности"],
-    "目前": ["на данный момент", "в данный момент"],
+    "目前": ["на данный момент", "в данный момент", "в настоящее время"],
     "根据": ["на основе", "исходя из того"],
     "由于": ["из-за того что", "благодаря тому что"],
     "总之": ["в общем и целом", "суммируя"],
     "值得注意的是": ["стоит отметить что", "нужно отметить"],
     "因此": ["из этого следует", "таким образом следует"],
-    # 教会称谓 · 姊妹（单人）
-    "姊妹": ["сестры люба", "сестры луба", "сестры -"],
+    # 教会称谓 · 姊妹/弟兄（单人；MT 常误译为复数）
+    "姊妹": [
+        "сестры люба",
+        "сестры луба",
+        "сестры -",
+        "сестры любы",
+        "сестер люба",
+        "сёстры",
+    ],
+    "弟兄": [
+        "братья пётр",
+        "братья петр",
+        "братья -",
+        "братьев пётр",
+        "братьев петр",
+    ],
     # 素质 / 工作能力（口语评价）
     "素质": ["лучше, чем работа", "лучше чем работа", "лучше, чем работу"],
     "有工作能力": ["лучше, чем работа", "лучше чем работа"],
@@ -222,12 +236,14 @@ _CALQUES_UK: dict[str, list[str]] = {
     "没关系": ["це не має відношення"],
     "不用谢": ["не потрібно дякувати"],
     "实际上": ["в дійсності", "в реальності"],
-    "目前": ["на даний момент"],
+    "目前": ["на даний момент", "в даний час"],
     "根据": ["на основі"],
     "由于": ["через те що"],
     "因此": ["з цього випливає"],
     "素质": ["краще, ніж робота", "краще ніж робота"],
     "有工作能力": ["краще, ніж робота"],
+    "姊妹": ["сестри люба", "сестри луба", "сестер люба"],
+    "弟兄": ["брати петро", "брати пётр", "братів петро"],
     "说话比较直接": ["говорить прямо, їй говорить прямо"],
     "把心情说出来": ["їй говорить прямо"],
     "上帝": ["небесний отець"],
@@ -351,15 +367,318 @@ def apply_zh_name_transliteration_fix(
 
 
 def _zh_singular_person_clause(source_text: str) -> bool:
+    return _zh_person_description_clause(source_text)
+
+
+def _zh_predicative_copula_ge(source_text: str) -> bool:
+    """源语含「是+个/一个/位/名」类谓语（是个与是一个应同译）。"""
+    src = source_text or ""
+    return bool(
+        re.search(
+            r"是(?:一个|一位|一名|个(?=[\u4e00-\u9fff])|位(?=[\u4e00-\u9fff])|名(?=[\u4e00-\u9fff]))|是个",
+            src,
+        )
+    )
+
+
+def _ru_inst_adj_to_nom(adj: str) -> str:
+    a = (adj or "").strip()
+    low = a.lower()
+    if low.endswith("ичным"):
+        return a[:-5] + "ичный"
+    if low.endswith("ным") and len(low) > 4:
+        return a[:-2] + "ый"
+    if low.endswith("им") and len(low) > 3:
+        return a[:-2] + "ий"
+    if low.endswith("ой"):
+        return a[:-2] + "ый"
+    if low.endswith("ей"):
+        return a[:-2] + "ий"
+    return a
+
+
+def _uk_inst_adj_to_nom(adj: str) -> str:
+    a = (adj or "").strip()
+    low = a.lower()
+    if low.endswith("ним") and len(low) > 4:
+        return a[:-3] + "ний"
+    if low.endswith("ою"):
+        return a[:-2] + "а"
+    return a
+
+
+def apply_zh_predicative_copula_repairs(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """
+    「是个 / 是一个 / 是位…」：译文统一为破折号谓语或自然系词，避免
+    является / это / есть 混用导致同句不同译法。
+    """
+    if not slavic_idiom_fix_enabled() or not source_text or not target_text:
+        return target_text
+    if not _zh_predicative_copula_ge(source_text):
+        return target_text
+    code = (target_lang or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return target_text
+    out = target_text
+    human = "человек" if code == "ru" else "людина"
+
+    if code == "ru":
+        out = re.sub(r"\bэто\s+является\s+", "это ", out, flags=re.I)
+        out = re.sub(
+            r"\bявляется\s+([а-яё]+(?:им|ым|ой|ей))\s+"
+            + re.escape(human)
+            + r"ом\b",
+            lambda m: f"— {_ru_inst_adj_to_nom(m.group(1))} {human}",
+            out,
+            flags=re.I,
+        )
+        if _zh_person_description_clause(source_text):
+            out = re.sub(
+                r"([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+)?)\s+(?:это|является|есть)\s+",
+                r"\1 — ",
+                out,
+                count=3,
+            )
+            out = re.sub(
+                r"—\s*([а-яё]+(?:им|ым))\s+"
+                + re.escape(human)
+                + r"ом\b",
+                lambda m: f"— {_ru_inst_adj_to_nom(m.group(1))} {human}",
+                out,
+                flags=re.I,
+            )
+    else:
+        out = re.sub(r"\bце\s+є\s+", "це ", out, flags=re.I)
+        out = re.sub(
+            r"\bє\s+([а-яіїєґ]+(?:им|ою))\s+"
+            + re.escape(human)
+            + r"ою\b",
+            lambda m: f"— {_uk_inst_adj_to_nom(m.group(1))} {human}",
+            out,
+            flags=re.I,
+        )
+        if _zh_person_description_clause(source_text):
+            out = re.sub(
+                r"([А-ЯІЇЄҐ][а-яіїєґ]+(?:\s+[А-ЯІЇЄҐ][а-яіїєґ]+)?)\s+(?:це|є)\s+",
+                r"\1 — ",
+                out,
+                count=3,
+            )
+    out = re.sub(r"\s+—\s+—\s+", " — ", out)
+    out = re.sub(r"\s{2,}", " ", out)
+    return out.strip() if out else out
+
+
+def _zh_person_description_clause(source_text: str) -> bool:
+    """源语描述「一个/是个/是一位…的人」等（单人，非复数）。"""
     src = source_text or ""
     if any(x in src for x in ("们", "两位", "两个", "两名", "诸位", "各位")):
         return False
-    return bool(re.search(r"一个.{0,24}人", src))
+    return bool(
+        re.search(
+            r"(?:一个|是个|是一个|是位|是一名|此人是|这个人是|他是|她是).{0,28}人",
+            src,
+        )
+        or re.search(r"(?:很|非常|十分|极其|特别).{0,16}(?:的)?人", src)
+        or re.search(r"为人.{0,12}(?:的)?人", src)
+    )
+
+
+@lru_cache(maxsize=1)
+def _person_traits_bundle() -> dict:
+    return _load_json("zh_person_traits.json")
+
+
+@lru_cache(maxsize=1)
+def _person_trait_rules() -> tuple[dict, ...]:
+    data = _person_traits_bundle()
+    rules: list[dict] = []
+    for item in data.get("rules") or []:
+        if isinstance(item, dict) and str(item.get("zh") or "").strip():
+            rules.append(item)
+    rules.sort(key=lambda r: len(str(r.get("zh") or "")), reverse=True)
+    return tuple(rules)
+
+
+@lru_cache(maxsize=1)
+def _person_trait_objects() -> dict[str, dict]:
+    raw = _person_traits_bundle().get("objects") or {}
+    return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
+
+
+@lru_cache(maxsize=1)
+def _person_verb_templates() -> tuple[dict, ...]:
+    tpls = _person_traits_bundle().get("verb_templates") or []
+    out: list[dict] = []
+    for item in tpls:
+        if isinstance(item, dict) and str(item.get("prefix") or "").strip():
+            out.append(item)
+    out.sort(key=lambda t: len(str(t.get("prefix") or "")), reverse=True)
+    return tuple(out)
+
+
+def clear_person_trait_cache() -> None:
+    _person_traits_bundle.cache_clear()
+    _person_trait_rules.cache_clear()
+    _person_trait_objects.cache_clear()
+    _person_verb_templates.cache_clear()
+
+
+_PERSON_INNER_CLAUSE = re.compile(
+    r"(?:是(?:个|一个|一位|一名|位|名)?)([^，。；！？\n]{2,24}?)(?:的)?人"
+)
+
+
+def _extract_person_inner_clause(source_text: str) -> str:
+    src = source_text or ""
+    m = _PERSON_INNER_CLAUSE.search(src)
+    if not m:
+        return ""
+    return (m.group(1) or "").strip()
+
+
+def _format_predicate(template: str, obj: dict) -> str:
+    merged = {k: str(v) for k, v in obj.items() if not k.startswith("stems")}
+    try:
+        return template.format(**merged)
+    except KeyError:
+        return ""
+
+
+def _rule_from_verb_template(inner: str, tpl: dict, obj: dict) -> dict | None:
+    pred_ru = _format_predicate(str(tpl.get("predicate_ru") or ""), obj)
+    pred_uk = _format_predicate(str(tpl.get("predicate_uk") or ""), obj)
+    if not pred_ru and not pred_uk:
+        return None
+    stems_ru = list(obj.get("stems_ru") or [])
+    stems_uk = list(obj.get("stems_uk") or [])
+    stems_ru.extend(tpl.get("extra_stems_ru") or [])
+    stems_uk.extend(tpl.get("extra_stems_uk") or [])
+    return {
+        "zh": inner,
+        "ru": pred_ru.split(",")[-1].strip() if pred_ru else "",
+        "uk": pred_uk.split(",")[-1].strip() if pred_uk else "",
+        "predicate_ru": pred_ru,
+        "predicate_uk": pred_uk,
+        "stems_ru": stems_ru,
+        "stems_uk": stems_uk,
+    }
+
+
+def _match_dynamic_person_trait_rule(inner: str) -> dict | None:
+    inner = (inner or "").strip()
+    if not inner:
+        return None
+    objects = _person_trait_objects()
+    for tpl in _person_verb_templates():
+        prefix = str(tpl.get("prefix") or "")
+        if not inner.startswith(prefix):
+            continue
+        obj_key = inner[len(prefix) :].strip()
+        obj = objects.get(obj_key)
+        if obj is None:
+            continue
+        rule = _rule_from_verb_template(inner, tpl, obj)
+        if rule:
+            return rule
+    return None
+
+
+def _trait_predicate(rule: dict, lang: str) -> str:
+    code = (lang or "").strip().lower()
+    if code == "uk":
+        return str(rule.get("predicate_uk") or "").strip()
+    return str(rule.get("predicate_ru") or "").strip()
+
+
+# 机翻常用 - / – / — 作系词
+_PREDICATE_DASH = r"[-—–‐‑‒]\s*"
+
+
+def _match_person_trait_rule(source_text: str) -> dict | None:
+    src = source_text or ""
+    for rule in _person_trait_rules():
+        zh = str(rule.get("zh") or "").strip()
+        if zh and zh in src:
+            return rule
+    inner = _extract_person_inner_clause(src)
+    if inner:
+        for rule in _person_trait_rules():
+            zh = str(rule.get("zh") or "").strip()
+            if zh and (inner == zh or inner.startswith(zh)):
+                return rule
+        dyn = _match_dynamic_person_trait_rule(inner)
+        if dyn:
+            return dyn
+    return None
+
+
+def _trait_adj(rule: dict, lang: str) -> str:
+    code = (lang or "").strip().lower()
+    if code == "uk":
+        return str(rule.get("uk") or rule.get("ru") or "").strip()
+    return str(rule.get("ru") or "").strip()
+
+
+def _target_has_person_trait_stem(target_text: str, rule: dict, lang: str) -> bool:
+    low = (target_text or "").lower()
+    code = (lang or "").strip().lower()
+    key = "stems_uk" if code == "uk" else "stems_ru"
+    for stem in rule.get(key) or rule.get("stems_ru") or ():
+        s = str(stem).strip().lower()
+        if s and s in low:
+            return True
+    return False
+
+
+def _target_has_generic_person_praise(target_text: str, lang: str) -> bool:
+    low = (target_text or "").lower()
+    code = (lang or "").strip().lower()
+    if code == "ru":
+        return bool(
+            re.search(r"\bхорош\w*(?:\s+человек|\s+личность)?\b", low)
+            or re.search(r"\bдобр\w*\s+человек\b", low)
+        )
+    return bool(
+        re.search(r"\bхорош\w*\s+людин[аиу]?\b", low)
+        or re.search(r"\bдобр\w*\s+людин[аиу]?\b", low)
+    )
+
+
+_SISTER_EXPLICIT_PLURAL_RE = re.compile(
+    r"姊妹们|众姊妹|诸位姊妹|各位姊妹|"
+    r"(?:两|三|四|五|六|七|八|九|十|几|若干|许多|很多|不少|多位|几位|数个|多个)(?:个|名|位)?姊妹|"
+    r"\d+\s*个?\s*姊妹|"
+    r"姊妹\s*(?:们|等|俩|两者)"
+)
+
+
+def _zh_sister_title_explicit_plural(source_text: str) -> bool:
+    """源语明确表示多位姊妹（生物姐妹或复数称谓），不做单数强制。"""
+    return bool(_SISTER_EXPLICIT_PLURAL_RE.search(source_text or ""))
+
+
+def _zh_sister_title_singular_context(source_text: str) -> bool:
+    """教会称谓「姊妹」默认按单人理解，除非源语写明复数。"""
+    src = source_text or ""
+    return "姊妹" in src and not _zh_sister_title_explicit_plural(src)
+
+
+def _name_for_sister_title(source_text: str) -> str:
+    src = source_text or ""
+    m = re.search(r"([\u4e00-\u9fff]{2,5})姊妹", src)
+    if m:
+        return m.group(1)
+    m = re.search(r"姊妹([\u4e00-\u9fff]{2,5})", src)
+    return m.group(1) if m else ""
 
 
 def _name_before_sister_title(source_text: str) -> str:
-    m = re.search(r"([\u4e00-\u9fff]{2,5})姊妹", source_text or "")
-    return m.group(1) if m else ""
+    return _name_for_sister_title(source_text)
 
 
 def _zh_name_to_slavic(name_zh: str, lang: str) -> str:
@@ -373,36 +692,337 @@ def _zh_name_to_slavic(name_zh: str, lang: str) -> str:
 
 
 def _positive_person_adj_ru(source_text: str) -> str:
-    src = source_text or ""
-    if "积极向上" in src or "积极" in src:
-        return "позитивный"
-    if "乐观" in src:
-        return "оптимистичный"
-    return "хороший"
+    return _person_trait_adj(source_text, "ru")
 
 
 def _positive_person_adj_uk(source_text: str) -> str:
-    src = source_text or ""
-    if "积极向上" in src or "积极" in src:
-        return "позитивна"
-    if "乐观" in src:
-        return "оптимістична"
-    return "хороша"
+    return _person_trait_adj(source_text, "uk")
+
+
+def _person_trait_adj(source_text: str, lang: str) -> str:
+    """性格形容词（与 человек/людина 搭配，用阳性形式）。"""
+    rule = _match_person_trait_rule(source_text)
+    if rule:
+        return _trait_adj(rule, lang)
+    code = (lang or "").strip().lower()
+    return "хороший" if code == "ru" else "хороша"
+
+
+def _person_trait_target_phrase(source_text: str, lang: str) -> str:
+    """称谓句谓语：优先 predicate（如 человек, стремящийся к истине）。"""
+    code = (lang or "").strip().lower()
+    human = "человек" if code == "ru" else "людина"
+    rule = _match_person_trait_rule(source_text)
+    if rule is None:
+        return f"{_person_trait_adj(source_text, lang)} {human}"
+    pred = _trait_predicate(rule, lang)
+    if pred:
+        return pred
+    adj = _trait_adj(rule, lang)
+    return f"{adj} {human}" if adj else human
+
+
+def _source_has_person_trait(source_text: str) -> bool:
+    return _match_person_trait_rule(source_text) is not None
+
+
+def _target_person_trait_mismatch(
+    source_text: str, target_text: str, lang: str
+) -> bool:
+    rule = _match_person_trait_rule(source_text)
+    if rule is None:
+        return False
+    if _target_has_person_trait_stem(target_text, rule, lang):
+        return False
+    return _target_has_generic_person_praise(target_text, lang) or _zh_person_description_clause(
+        source_text
+    )
+
+
+def _ru_instrumental_adj(adj: str) -> str:
+    a = (adj or "").strip()
+    if a.endswith("ий"):
+        return a[:-2] + "им"
+    if a.endswith("ый"):
+        return a[:-2] + "ым"
+    return a
+
+
+def _apply_person_trait_adj_fix(
+    source_text: str,
+    target_text: str,
+    rule: dict,
+    lang: str,
+) -> str:
+    adj = _trait_adj(rule, lang)
+    predicate = _trait_predicate(rule, lang)
+    if not adj and not predicate:
+        return target_text
+    code = (lang or "").strip().lower()
+    human = "человек" if code == "ru" else "людина"
+    out = target_text
+    zh = str(rule.get("zh") or "")
+
+    if predicate:
+        pred_esc = re.escape(predicate)
+        if code == "ru":
+            out = re.sub(
+                _PREDICATE_DASH
+                + r"хорош(?:ий|ая|ое)\s+человек\.?",
+                f"— {predicate}.",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"\bхорош(?:ий|ая|ое)\s+человек\.?",
+                f"{predicate}.",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"\bдобр(?:ый|ая|ое)\s+человек\.?",
+                f"{predicate}.",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"\bявляется\s+хорош(?:им|ой|ым)\s+человеком\.?",
+                f"— {predicate}.",
+                out,
+                flags=re.I,
+            )
+        else:
+            out = re.sub(
+                _PREDICATE_DASH
+                + r"хорош(?:ий|а|е)\s+людин[аиу]?\.?",
+                f"— {predicate}.",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"\bхорош(?:ий|а|е)\s+людин[аиу]?\.?",
+                f"{predicate}.",
+                out,
+                flags=re.I,
+            )
+        if re.search(pred_esc, out, flags=re.I):
+            return out.strip() if out else out
+        return out.strip() if out else out
+    # 善良/好心：保留 добр-，不把 добрый 改成别的
+    if zh not in ("善良", "好心", "慈祥"):
+        if code == "ru":
+            out = re.sub(
+                r"\bхорош(?:ий|ая|ое)(?:\s+человек|\s+личность)?\b",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"\bдобр(?:ый|ая|ое)\s+человек\b",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                _PREDICATE_DASH + r"хорош(?:ий|ая|ое)\s+человек\b",
+                f"— {adj} {human}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"\bочень\s+хорош(?:ий|ая|ое)\b",
+                f"очень {adj}",
+                out,
+                flags=re.I,
+            )
+            inst = _ru_instrumental_adj(adj)
+            out = re.sub(
+                r"\bявляется\s+хорош(?:им|ой|ым)\s+человеком\b",
+                f"является {inst} человеком",
+                out,
+                flags=re.I,
+            )
+        else:
+            out = re.sub(
+                r"\bхорош(?:ий|а|е)\s+людин[аиу]?\b",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"\bдобр(?:ий|а|е)\s+людин[аиу]?\b",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                _PREDICATE_DASH + r"хорош(?:ий|а|е)\s+людин[аиу]?\b",
+                f"— {adj} {human}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"\bдуже\s+хорош(?:ий|а|е)\b",
+                f"дуже {adj}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"\bочень\s+хорош(?:ий|а|е)\b",
+                f"очень {adj}",
+                out,
+                flags=re.I,
+            )
+    elif code == "ru" and re.search(r"\bхорош\w*\s+человек", out, flags=re.I):
+        out = re.sub(
+            r"\bхорош(?:ий|ая|ое)\s+человек\b",
+            f"{adj} {human}",
+            out,
+            flags=re.I,
+        )
+    return out
+
+
+def _fix_person_trait_with_human(
+    source_text: str,
+    target_text: str,
+    lang: str,
+) -> str:
+    return apply_zh_person_trait_repairs(source_text, target_text, lang)
+
+
+def apply_zh_person_trait_repairs(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """
+    性格/人品评价：避免 Argos 把具体褒义词一律译成 хороший/добрый。
+    适用于「…的人」、称谓+评价、很…等句式。
+    """
+    if not slavic_idiom_fix_enabled() or not source_text or not target_text:
+        return target_text
+    code = (target_lang or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return target_text
+    rule = _match_person_trait_rule(source_text)
+    if rule is None:
+        return target_text
+    if _target_has_person_trait_stem(target_text, rule, code):
+        return target_text
+    if not (
+        _target_has_generic_person_praise(target_text, code)
+        or _zh_person_description_clause(source_text)
+        or re.search(r"(?:很|非常|十分|极其).{0,12}", source_text)
+    ):
+        return target_text
+    return _apply_person_trait_adj_fix(source_text, target_text, rule, code)
+
+
+def person_trait_translation_bad(source_text: str, target_text: str) -> bool:
+    """译文是否把具体性格词泛化成「好」。"""
+    code = (
+        "uk"
+        if re.search(r"[іїєґ]", target_text or "", re.I)
+        else "ru"
+    )
+    return _target_person_trait_mismatch(source_text, target_text, code)
+
+
+def _target_has_church_sister_plural(target_text: str, lang: str, *, name_slavic: str = "") -> bool:
+    """译文把教会称谓「姊妹」译成复数形式（非属格单数 у сестры）。"""
+    out = target_text or ""
+    low = out.lower()
+    code = (lang or "").strip().lower()
+    name = (name_slavic or "").strip()
+    if code == "ru":
+        if name and re.search(
+            rf"\bсестры\s+{re.escape(name)}\b", out, flags=re.I
+        ):
+            return True
+        if re.search(r"(?:^|[.!?]\s+)сестры\b", low):
+            return True
+        if re.search(r"\bсестры\s+[а-яё]", low) and not re.search(
+            r"(?<=[уо])\s+сестры\b", low
+        ):
+            return True
+        return False
+    if code == "uk":
+        if name and re.search(
+            rf"\bсестри\s+{re.escape(name)}\b", out, flags=re.I
+        ):
+            return True
+        if re.search(r"(?:^|[.!?]\s+)сестри\b", low):
+            return True
+        if re.search(r"\bсестри\s+[а-яіїєґ]", low) and not re.search(
+            r"(?<=[уо])\s+сестри\b", low
+        ):
+            return True
+    return False
 
 
 def _target_sister_title_plural_error(source_text: str, target_text: str) -> bool:
-    if "姊妹" not in (source_text or ""):
+    if not _zh_sister_title_singular_context(source_text):
         return False
-    if not _zh_singular_person_clause(source_text):
-        return False
+    code = "ru"
+    if re.search(r"[іїєґ]", target_text or "", re.I):
+        code = "uk"
+    name = _zh_name_to_slavic(_name_for_sister_title(source_text), code)
+    if _target_has_church_sister_plural(target_text, code, name_slavic=name):
+        return True
     low = (target_text or "").lower()
-    if re.search(r"\bсестры\b", low):
-        return True
-    if "люди" in low and "человек" not in low:
-        return True
-    if re.search(r"\bлуба\b", low) and "柳芭" in source_text:
-        return True
+    if _zh_singular_person_clause(source_text):
+        if "люди" in low and "человек" not in low and "людина" not in low:
+            return True
+        if re.search(r"\bлуба\b", low) and "柳芭" in source_text:
+            return True
     return False
+
+
+def _fix_church_sister_plural_forms(
+    target_text: str,
+    lang: str,
+    *,
+    name_slavic: str = "",
+) -> str:
+    """将教会称谓误译的复数 сестры/сестри 改为单数 сестра（保留 у сестры 属格）。"""
+    out = target_text
+    code = (lang or "").strip().lower()
+    name = (name_slavic or "").strip()
+    if code == "ru":
+        if name:
+            out = re.sub(
+                rf"\bСестры\s+{re.escape(name)}\b",
+                f"Сестра {name}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                rf"\bсестры\s+{re.escape(name)}\b",
+                f"сестра {name}",
+                out,
+                flags=re.I,
+            )
+        out = re.sub(r"\bСестры\b", "Сестра", out)
+        out = re.sub(r"(?:^|[.!?]\s+)сестры\b", lambda m: m.group(0).replace("сестры", "сестра"), out, flags=re.I)
+        return out
+    if code == "uk":
+        if name:
+            out = re.sub(
+                rf"\bСестри\s+{re.escape(name)}\b",
+                f"Сестра {name}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                rf"\bсестри\s+{re.escape(name)}\b",
+                f"сестра {name}",
+                out,
+                flags=re.I,
+            )
+        out = re.sub(r"\bСестри\b", "Сестра", out)
+        out = re.sub(r"(?:^|[.!?]\s+)сестри\b", lambda m: m.group(0).replace("сестри", "сестра"), out, flags=re.I)
+    return out
 
 
 def apply_zh_sister_title_fix(
@@ -412,31 +1032,41 @@ def apply_zh_sister_title_fix(
 ) -> str:
     """
     「某某姊妹」= 一位姐妹（教会称谓），非复数 сестры。
-    源句含「一个…人」时强制单数 сестра + человек，并校正常见人名转写。
+    默认按单数处理；源语含「姊妹们/两位姊妹」等时保留复数。
+    源句含「一个…人」时可整句改写为「Сестра … — … человек」。
     """
     if not slavic_idiom_fix_enabled() or not source_text or not target_text:
         return target_text
     src = source_text.strip()
-    if "姊妹" not in src:
-        return target_text
-    if not _zh_singular_person_clause(src):
+    if not _zh_sister_title_singular_context(src):
         return target_text
     code = (target_lang or "").strip().lower()
     if code not in ("ru", "uk"):
         return target_text
 
-    name_zh = _name_before_sister_title(src)
-    name_ru = _zh_name_to_slavic(name_zh, code)
+    name_zh = _name_for_sister_title(src)
+    name_slavic = _zh_name_to_slavic(name_zh, code)
+    out = target_text
 
-    if _target_sister_title_plural_error(src, target_text) or name_ru:
+    if _zh_person_description_clause(src) and name_slavic:
+        rule = _match_person_trait_rule(src)
+        if rule and _target_has_person_trait_stem(out, rule, code):
+            pass
+        elif _source_has_person_trait(src) or _target_person_trait_mismatch(
+            src, out, code
+        ):
+            phrase = _person_trait_target_phrase(src, code)
+            return f"Сестра {name_slavic} — {phrase}."
+
+    if _zh_singular_person_clause(src) and (
+        _target_sister_title_plural_error(src, out) or name_slavic
+    ):
         if code == "ru":
+            if name_slavic:
+                phrase = _person_trait_target_phrase(src, code)
+                return f"Сестра {name_slavic} — {phrase}."
             adj = _positive_person_adj_ru(src)
             human = "человек"
-            if name_ru:
-                return f"Сестра {name_ru} — {adj} {human}."
-            out = target_text
-            out = re.sub(r"\bСестры\b", "Сестра", out, flags=re.I)
-            out = re.sub(r"\bсестры\b", "сестра", out)
             out = re.sub(r"\bЛуба\b", "Люба", out, flags=re.I)
             out = re.sub(
                 r"позитивные\s+люди",
@@ -450,25 +1080,273 @@ def apply_zh_sister_title_fix(
                 out,
                 flags=re.I,
             )
-            return out
+        else:
+            if name_slavic:
+                phrase = _person_trait_target_phrase(src, code)
+                return f"Сестра {name_slavic} — {phrase}."
+            adj = _positive_person_adj_uk(src)
+            human = "людина"
+            out = re.sub(r"\bЛуба\b", "Люба", out, flags=re.I)
+            out = re.sub(
+                r"позитивні\s+люди",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
 
-        adj = _positive_person_adj_uk(src)
-        human = "людина"
-        if name_ru:
-            return f"Сестра {name_ru} — {adj} {human}."
-        out = target_text
-        out = re.sub(r"\bСестри\b", "Сестра", out, flags=re.I)
-        out = re.sub(r"\bсестри\b", "сестра", out)
-        out = re.sub(r"\bЛуба\b", "Люба", out, flags=re.I)
+    if _target_has_church_sister_plural(out, code, name_slavic=name_slavic):
+        out = _fix_church_sister_plural_forms(out, code, name_slavic=name_slavic)
+
+    # 名+姊妹：确保标题为「Сестра Имя」
+    if name_slavic and name_zh in src:
+        title = f"Сестра {name_slavic}"
+        if title.lower() not in out.lower():
+            for bad in (
+                f"Сестры {name_slavic}",
+                f"сестры {name_slavic}",
+                f"Сестри {name_slavic}",
+                f"сестри {name_slavic}",
+            ):
+                if bad.lower() in out.lower():
+                    out = _case_insensitive_replace(out, bad, title)
+                    break
+
+    out = _fix_person_trait_with_human(src, out, code)
+    return out
+
+
+_BROTHER_EXPLICIT_PLURAL_RE = re.compile(
+    r"弟兄们|众弟兄|诸位弟兄|各位弟兄|"
+    r"(?:两|三|四|五|六|七|八|九|十|几|若干|许多|很多|不少|多位|几位|数个|多个)(?:个|名|位)?弟兄|"
+    r"\d+\s*个?\s*弟兄|"
+    r"弟兄\s*(?:们|等|俩|两者)"
+)
+
+
+def _zh_brother_title_explicit_plural(source_text: str) -> bool:
+    return bool(_BROTHER_EXPLICIT_PLURAL_RE.search(source_text or ""))
+
+
+def _zh_brother_title_singular_context(source_text: str) -> bool:
+    src = source_text or ""
+    return "弟兄" in src and not _zh_brother_title_explicit_plural(src)
+
+
+def _name_for_brother_title(source_text: str) -> str:
+    src = source_text or ""
+    m = re.search(r"([\u4e00-\u9fff]{2,5})弟兄", src)
+    if m:
+        return m.group(1)
+    m = re.search(r"弟兄([\u4e00-\u9fff]{2,5})", src)
+    return m.group(1) if m else ""
+
+
+def _target_has_church_brother_plural(
+    target_text: str, lang: str, *, name_slavic: str = ""
+) -> bool:
+    out = target_text or ""
+    low = out.lower()
+    code = (lang or "").strip().lower()
+    name = (name_slavic or "").strip()
+    if code == "ru":
+        if name and re.search(
+            rf"\bбратья\s+{re.escape(name)}\b", out, flags=re.I
+        ):
+            return True
+        if re.search(r"(?:^|[.!?]\s+)братья\b", low):
+            return True
+        if re.search(r"\bбратья\s+[а-яё]", low) and not re.search(
+            r"(?<=[уо])\s+братья\b", low
+        ):
+            return True
+        return False
+    if code == "uk":
+        if name and re.search(
+            rf"\bбрати\s+{re.escape(name)}\b", out, flags=re.I
+        ):
+            return True
+        if re.search(r"(?:^|[.!?]\s+)брати\b", low):
+            return True
+        if re.search(r"\bбрати\s+[а-яіїєґ]", low) and not re.search(
+            r"(?<=[уо])\s+брати\b", low
+        ):
+            return True
+    return False
+
+
+def _target_brother_title_plural_error(source_text: str, target_text: str) -> bool:
+    if not _zh_brother_title_singular_context(source_text):
+        return False
+    code = "ru"
+    if re.search(r"[іїєґ]", target_text or "", re.I):
+        code = "uk"
+    name = _zh_name_to_slavic(_name_for_brother_title(source_text), code)
+    if _target_has_church_brother_plural(target_text, code, name_slavic=name):
+        return True
+    low = (target_text or "").lower()
+    if _zh_singular_person_clause(source_text):
+        if "люди" in low and "человек" not in low and "людина" not in low:
+            return True
+    return False
+
+
+def _fix_church_brother_plural_forms(
+    target_text: str,
+    lang: str,
+    *,
+    name_slavic: str = "",
+) -> str:
+    out = target_text
+    code = (lang or "").strip().lower()
+    name = (name_slavic or "").strip()
+    if code == "ru":
+        if name:
+            out = re.sub(
+                rf"\bБратья\s+{re.escape(name)}\b",
+                f"Брат {name}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                rf"\bбратья\s+{re.escape(name)}\b",
+                f"брат {name}",
+                out,
+                flags=re.I,
+            )
+        out = re.sub(r"\bБратья\b", "Брат", out)
         out = re.sub(
-            r"позитивні\s+люди",
-            f"{adj} {human}",
+            r"(?:^|[.!?]\s+)братья\b",
+            lambda m: m.group(0).replace("братья", "брат"),
             out,
             flags=re.I,
         )
         return out
+    if code == "uk":
+        if name:
+            out = re.sub(
+                rf"\bБрати\s+{re.escape(name)}\b",
+                f"Брат {name}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                rf"\bбрати\s+{re.escape(name)}\b",
+                f"брат {name}",
+                out,
+                flags=re.I,
+            )
+        out = re.sub(r"\bБрати\b", "Брат", out)
+        out = re.sub(
+            r"(?:^|[.!?]\s+)брати\b",
+            lambda m: m.group(0).replace("брати", "брат"),
+            out,
+            flags=re.I,
+        )
+    return out
 
-    return target_text
+
+def apply_zh_brother_title_fix(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """
+    「某某弟兄」= 一位弟兄（教会称谓），非复数 братья。
+    规则同 apply_zh_sister_title_fix。
+    """
+    if not slavic_idiom_fix_enabled() or not source_text or not target_text:
+        return target_text
+    src = source_text.strip()
+    if not _zh_brother_title_singular_context(src):
+        return target_text
+    code = (target_lang or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return target_text
+
+    name_zh = _name_for_brother_title(src)
+    name_slavic = _zh_name_to_slavic(name_zh, code)
+    out = target_text
+
+    if _zh_person_description_clause(src) and name_slavic:
+        rule = _match_person_trait_rule(src)
+        if rule and _target_has_person_trait_stem(out, rule, code):
+            pass
+        elif _source_has_person_trait(src) or _target_person_trait_mismatch(
+            src, out, code
+        ):
+            phrase = _person_trait_target_phrase(src, code)
+            return f"Брат {name_slavic} — {phrase}."
+
+    if _zh_singular_person_clause(src) and (
+        _target_brother_title_plural_error(src, out) or name_slavic
+    ):
+        if code == "ru":
+            if name_slavic:
+                phrase = _person_trait_target_phrase(src, code)
+                return f"Брат {name_slavic} — {phrase}."
+            adj = _positive_person_adj_ru(src)
+            human = "человек"
+            out = re.sub(
+                r"позитивные\s+люди",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
+            out = re.sub(
+                r"позитивных\s+людей",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
+        else:
+            if name_slavic:
+                phrase = _person_trait_target_phrase(src, code)
+                return f"Брат {name_slavic} — {phrase}."
+            adj = _positive_person_adj_uk(src)
+            human = "людина"
+            out = re.sub(
+                r"позитивні\s+люди",
+                f"{adj} {human}",
+                out,
+                flags=re.I,
+            )
+
+    if _target_has_church_brother_plural(out, code, name_slavic=name_slavic):
+        out = _fix_church_brother_plural_forms(out, code, name_slavic=name_slavic)
+
+    if name_slavic and name_zh in src:
+        title = f"Брат {name_slavic}"
+        if title.lower() not in out.lower():
+            for bad in (
+                f"Братья {name_slavic}",
+                f"братья {name_slavic}",
+                f"Брати {name_slavic}",
+                f"брати {name_slavic}",
+            ):
+                if bad.lower() in out.lower():
+                    out = _case_insensitive_replace(out, bad, title)
+                    break
+
+    out = _fix_person_trait_with_human(src, out, code)
+    return out
+
+
+def _target_church_member_title_plural_error(
+    source_text: str, target_text: str
+) -> bool:
+    return _target_sister_title_plural_error(
+        source_text, target_text
+    ) or _target_brother_title_plural_error(source_text, target_text)
+
+
+def apply_zh_church_member_title_fix(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """教会称谓「姊妹」「弟兄」单数修补（入口）。"""
+    t = apply_zh_sister_title_fix(source_text, target_text, target_lang)
+    return apply_zh_brother_title_fix(source_text, t, target_lang)
 
 
 def _degenerate_direct_speech_ru(text: str) -> bool:
@@ -478,7 +1356,58 @@ def _degenerate_direct_speech_ru(text: str) -> bool:
     )
 
 
-def _target_has_qualities_work_semantics(low: str) -> bool:
+def _degenerate_repetitive_ru(text: str) -> bool:
+    """如：Она говорит прямо, ей говорит прямо."""
+    low = (text or "").lower()
+    if low.count("говорит") < 2:
+        return False
+    if not re.search(r"говорит\s+прям", low):
+        return False
+    parts = [p.strip() for p in re.split(r"[,;]", text) if p.strip()]
+    if len(parts) < 2:
+        return False
+    a, b = parts[0].lower(), parts[1].lower()
+    return "говорит" in a and "говорит" in b and "прям" in a and "прям" in b
+
+
+def _degenerate_repetitive_speech(text: str, lang: str) -> bool:
+    """口语直译重复（俄/乌）：говорит прямо, … говорит прямо。"""
+    code = (lang or "").strip().lower()
+    if code == "uk":
+        low = (text or "").lower()
+        if low.count("говорить") < 2 and low.count("говорит") < 2:
+            return False
+        if not re.search(r"говорит\w*\s+прям|прямолінійн", low):
+            return False
+        parts = [p.strip() for p in re.split(r"[,;]", text) if p.strip()]
+        if len(parts) < 2:
+            return False
+        a, b = parts[0].lower(), parts[1].lower()
+        return ("говор" in a and "говор" in b and "прям" in a and "прям" in b)
+    return _degenerate_repetitive_ru(text)
+
+
+def _degenerate_direct_speech(text: str, lang: str) -> bool:
+    code = (lang or "").strip().lower()
+    low = (text or "").lower()
+    if code == "uk":
+        hits = low.count("говорить") + low.count("говорит")
+        return hits >= 2 and "прям" in low and not re.search(
+            r"почутт|настрій|відчутт|чувств|настроен|пережив",
+            low,
+        )
+    return _degenerate_direct_speech_ru(text)
+
+
+def _target_has_qualities_work_semantics(low: str, lang: str = "ru") -> bool:
+    code = (lang or "").strip().lower()
+    if code == "uk":
+        return bool(
+            re.search(
+                r"якост|кваліф|здатн|працездат|професійн|компетент",
+                low,
+            )
+        )
     return bool(
         re.search(
             r"качеств|квалиф|способн|работоспособ|профессион|компетент",
@@ -500,8 +1429,15 @@ def target_qualities_work_translation_bad(
         or ("工作" in src and "能力" in src)
     ):
         return False
+    code = "uk" if re.search(r"[іїєґ]", target_text or "", re.I) else "ru"
     low = (target_text or "").lower()
-    if _target_has_qualities_work_semantics(low):
+    if _target_has_qualities_work_semantics(low, code):
+        return False
+    if code == "uk":
+        if re.search(r"краще.{0,24}робот|ніж\s+робот", low):
+            return True
+        if "робот" in low and "краще" in low:
+            return True
         return False
     if re.search(r"лучше.{0,20}работ|чем\s+работ", low):
         return True
@@ -642,6 +1578,47 @@ def _apply_zh_colloquial_mt_repairs(
                 count=1,
             )
         t = re.sub(r"(?i),\s*и\s+мне\s+кажется\b", ", мне кажется", t)
+    elif code == "uk":
+        if ("这一遍" in src or "这一次" in src) and re.search(
+            r"(?i)\bти\s+говориш\s+ус[еі]\s+це\b", t
+        ):
+            t = re.sub(
+                r"(?i)\bти\s+говориш\s+ус[еі]\s+це\b",
+                "цього разу",
+                t,
+                count=1,
+            )
+        if "自然" in src:
+            t = re.sub(
+                r"(?i)у\s+розмові,\s*природно,\s*що\s+мова\s+"
+                r"(?:йдеться|іде)\s+про",
+                "мова звучить природніше",
+                t,
+                count=1,
+            )
+            t = re.sub(
+                r"(?i)у\s+розмові,\s*природно,\s*що\s+мова\s+звучить",
+                "мова звучить",
+                t,
+                count=1,
+            )
+            t = re.sub(
+                r"(?i)\bмова\s+(?:йдеться|іде)\s+мова\s+звучить",
+                "мова звучить",
+                t,
+                count=1,
+            )
+        if ("刻意" in src or "夸张" in src) and re.search(
+            r"(?i)мудр\w+\s+перебільш", t
+        ):
+            t = re.sub(
+                r"(?i)(?:без\s+(?:такої\s+|такого\s+)?|такої\s+|такого\s+)?"
+                r"мудр\w+\s+перебільш\w*",
+                "без такої навмисно перебільшення інтонації",
+                t,
+                count=1,
+            )
+        t = re.sub(r"(?i),\s*і\s+мені\s+здається\b", ", мені здається", t)
     return t
 
 
@@ -663,7 +1640,7 @@ def apply_zh_colloquial_sentence_repairs(
         return t
     low = t.lower()
     missing_emotion = not re.search(r"чувств|настроен|пережив|почутт", low)
-    bad_repeat = _degenerate_direct_speech_ru(target_text)
+    bad_repeat = _degenerate_direct_speech(target_text, code)
     bad_partial = missing_emotion and bool(
         re.search(r"говорит\s+прям|прямолинейн", low)
     )
@@ -705,15 +1682,41 @@ def apply_idiom_fixes(
     t = apply_target_collocation_fixes(target_text, lang)
     src_lang = (source_lang or "").strip().lower()
     if source_text and src_lang in ("zh", "zt", "cn"):
+        try:
+            from zh_to_slavic_enhance import apply_diplomatic_news_calques
+
+            t = apply_diplomatic_news_calques(source_text, t, lang)
+        except ImportError:
+            pass
+        try:
+            from news_style_rerank import apply_style_rerank
+            from native_fluency_config import detect_domain
+
+            t = apply_style_rerank(
+                source_text,
+                t,
+                lang,
+                domain=detect_domain(source_text),
+            )
+        except ImportError:
+            pass
         t = apply_zh_name_transliteration_fix(source_text, t, lang)
-        t = apply_zh_sister_title_fix(source_text, t, lang)
+        t = apply_zh_predicative_copula_repairs(source_text, t, lang)
+        t = _apply_zh_colloquial_mt_repairs(source_text, t, lang)
+        t = apply_zh_person_trait_repairs(source_text, t, lang)
+        t = apply_zh_church_member_title_fix(source_text, t, lang)
         t = apply_zh_qualities_work_repairs(source_text, t, lang)
         t = apply_zh_colloquial_sentence_repairs(source_text, t, lang)
         t = apply_zh_source_idiom_hints(source_text, t, lang)
+        t = _apply_zh_colloquial_mt_repairs(source_text, t, lang)
         t = apply_zh_colloquial_sentence_repairs(source_text, t, lang)
+        t = apply_zh_predicative_copula_repairs(source_text, t, lang)
+        t = apply_zh_person_trait_repairs(source_text, t, lang)
         t = apply_zh_qualities_work_repairs(source_text, t, lang)
-        t = apply_zh_sister_title_fix(source_text, t, lang)
+        t = apply_zh_church_member_title_fix(source_text, t, lang)
         t = apply_zh_name_transliteration_fix(source_text, t, lang)
+        t = apply_zh_predicative_copula_repairs(source_text, t, lang)
+        t = apply_zh_person_trait_repairs(source_text, t, lang)
         t = apply_target_collocation_fixes(t, lang)
     return t
 

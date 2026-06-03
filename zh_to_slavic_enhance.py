@@ -127,7 +127,9 @@ def postprocess_zh_to_slavic(
         import slavic_idioms as si
 
         if si.slavic_idiom_fix_enabled():
-            t = si.apply_zh_colloquial_sentence_repairs(src, t, lang)
+            t = si.apply_idiom_fixes(
+                t, lang, source_text=src, source_lang="zh"
+            )
     except ImportError:
         pass
 
