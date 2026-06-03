@@ -242,7 +242,7 @@ def _install_pip_into_embed(py: Path, embed_dir: Path, cb: ProgressCb | None) ->
     if not _python_can_import(py, "pip", cwd=embed_dir):
         raise RuntimeError(
             "便携 Python 未能启用 pip。\n"
-            "请删除 %LOCALAPPDATA%\\ArgosTranslate\\embed-toolchain 后重试。"
+            "请删除 C:\\ProgramData\\ArgosTranslate\\embed-toolchain 后重试。"
         )
 
 
@@ -259,6 +259,24 @@ def _bootstrap_embed_python(embed_dir: Path, cb: ProgressCb | None) -> Path:
     return py
 
 
+def _create_venv_with_embed(install_root: Path, real_venv: Path, cb: ProgressCb | None) -> Path:
+    venv_arg = str(real_venv)
+    _emit(cb, 2, 0.1, "正在下载便携运行环境（约 25MB）…")
+    embed = embed_toolchain_dir(install_root)
+    py = _bootstrap_embed_python(embed, cb)
+    py_arg = str(py)
+    _emit(cb, 2, 0.78, "正在安装 virtualenv…")
+    _run(
+        [py_arg, "-m", "pip", "install", "virtualenv", "--no-warn-script-location"],
+        cwd=embed,
+    )
+    _emit(cb, 2, 0.9, "正在创建虚拟环境…")
+    _run([py_arg, "-m", "virtualenv", venv_arg], cwd=embed.parent)
+    ensure_venv_junction(install_root, real_venv)
+    _emit(cb, 2, 1.0, "虚拟环境创建完成。")
+    return real_venv / "Scripts" / "python.exe"
+
+
 def _create_venv(install_root: Path, cb: ProgressCb | None) -> Path:
     install_root = install_root.resolve()
     real_venv = venv_storage_dir(install_root)
@@ -273,25 +291,22 @@ def _create_venv(install_root: Path, cb: ProgressCb | None) -> Path:
     launcher = _find_python_launcher()
     if launcher:
         _emit(cb, 2, 0.35, "正在用本机 Python 创建虚拟环境…")
-        _run([*launcher, "-m", "venv", venv_arg], cwd=install_root)
-        ensure_venv_junction(install_root, real_venv)
-        _emit(cb, 2, 1.0, "虚拟环境创建完成。")
-        return real_venv / "Scripts" / "python.exe"
+        try:
+            _run([*launcher, "-m", "venv", venv_arg], cwd=install_root)
+            ensure_venv_junction(install_root, real_venv)
+            _emit(cb, 2, 1.0, "虚拟环境创建完成。")
+            return real_venv / "Scripts" / "python.exe"
+        except RuntimeError:
+            if real_venv.exists():
+                shutil.rmtree(real_venv, ignore_errors=True)
+            _emit(
+                cb,
+                2,
+                0.4,
+                "本机 Python 创建虚拟环境失败，改用内置便携环境…",
+            )
 
-    _emit(cb, 2, 0.1, "本机未检测到 Python，正在下载便携运行环境（约 25MB）…")
-    embed = embed_toolchain_dir(install_root)
-    py = _bootstrap_embed_python(embed, cb)
-    py_arg = str(py)
-    _emit(cb, 2, 0.78, "正在安装 virtualenv…")
-    _run(
-        [py_arg, "-m", "pip", "install", "virtualenv", "--no-warn-script-location"],
-        cwd=embed,
-    )
-    _emit(cb, 2, 0.9, "正在创建虚拟环境…")
-    _run([py_arg, "-m", "virtualenv", venv_arg], cwd=embed.parent)
-    ensure_venv_junction(install_root, real_venv)
-    _emit(cb, 2, 1.0, "虚拟环境创建完成。")
-    return real_venv / "Scripts" / "python.exe"
+    return _create_venv_with_embed(install_root, real_venv, cb)
 
 
 def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
