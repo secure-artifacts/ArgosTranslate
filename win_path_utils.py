@@ -177,3 +177,64 @@ def ensure_venv_junction(install_root: Path, real_venv: Path) -> None:
 def subprocess_path(path: Path | str) -> str:
     """传给 subprocess 的路径（普通 Unicode 字符串，不用 \\\\?\\ 前缀）。"""
     return str(Path(path).resolve())
+
+
+def remove_venv_junction(install_root: Path) -> None:
+    """删除安装目录下的 venv 目录联接（不删除实际 venv 存储目录）。"""
+    install_root = install_root.resolve()
+    link = install_root / "venv"
+    if not link.exists() and not link.is_symlink():
+        return
+    real_venv = venv_storage_dir(install_root)
+    if link.is_dir() and not link.is_symlink() and not _same_path(link, real_venv):
+        shutil.rmtree(link, ignore_errors=True)
+        return
+    if link.is_symlink() or (link.is_dir() and _same_path(link, real_venv)):
+        try:
+            link.unlink()
+        except OSError:
+            shutil.rmtree(link, ignore_errors=True)
+
+
+def remove_venv_storage(install_root: Path) -> None:
+    """删除该安装路径对应的实际 venv 目录。"""
+    store = venv_storage_dir(install_root).resolve()
+    if store.is_dir():
+        shutil.rmtree(store, ignore_errors=True)
+
+
+def toolchain_cache_hint() -> str:
+    """安装失败时提示用户可手动清理的缓存路径。"""
+    lines = [
+        r"C:\ProgramData\ArgosTranslate\embed-toolchain",
+        r"C:\ProgramData\ArgosTranslate\venvs",
+    ]
+    local = app_data_argos_dir()
+    lines.append(str(local / "embed-toolchain"))
+    lines.append(str(local / "venvs"))
+    return "\n".join(f"  · {p}" for p in lines)
+
+
+def cleanup_broken_install(install_root: Path) -> list[str]:
+    """
+    清理未完成或损坏的安装产物（保留已释放的程序文件与 data/）。
+    返回已清理项的说明列表。
+    """
+    install_root = install_root.resolve()
+    cleaned: list[str] = []
+    link = install_root / "venv"
+    if link.exists() or link.is_symlink():
+        remove_venv_junction(install_root)
+        cleaned.append(f"已删除：{link}")
+    store = venv_storage_dir(install_root)
+    if store.is_dir():
+        remove_venv_storage(install_root)
+        cleaned.append(f"已删除：{store}")
+    bootstrap = install_root / "_bootstrap"
+    complete = (install_root / "terminology_bridge.py").is_file() and (
+        install_root / "venv" / "Scripts" / "pythonw.exe"
+    ).is_file()
+    if bootstrap.is_dir() and not complete:
+        shutil.rmtree(bootstrap, ignore_errors=True)
+        cleaned.append(f"已删除：{bootstrap}")
+    return cleaned

@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 from portable_installer import (
     INSTALL_STEP_TITLES,
     InstallProgress,
+    cleanup_failed_install,
     default_install_dir,
     install_to,
 )
@@ -21,7 +22,7 @@ class InstallWizard:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("本地翻译器 — 安装")
-        self.root.geometry("540x440")
+        self.root.geometry("540x470")
         self.root.resizable(False, False)
         self._target = tk.StringVar()
         saved = load_install_pointer()
@@ -41,8 +42,9 @@ class InstallWizard:
         tk.Label(
             self.root,
             text=(
+                "只需本安装程序（exe），程序文件已内嵌，无需另下载 zip。\n"
                 "请选择安装文件夹（可任意盘符，支持中文路径如 F:\\本地翻译）。\n"
-                "首次安装需联网，将自动完成下列步骤（约 3～8 分钟）："
+                "首次安装需联网下载 Python 运行环境与翻译组件（约 3～8 分钟）："
             ),
             justify="left",
             wraplength=500,
@@ -107,6 +109,13 @@ class InstallWizard:
             btn_row, text="开始安装", width=12, command=self._start_install
         )
         self._btn_install.pack(side="right")
+        self._btn_clean = tk.Button(
+            btn_row,
+            text="清理并重试",
+            width=12,
+            command=self._clean_and_retry,
+        )
+        self._btn_clean.pack(side="right", padx=(0, 8))
         tk.Button(btn_row, text="取消", width=8, command=self.root.destroy).pack(
             side="right", padx=(0, 8)
         )
@@ -144,6 +153,22 @@ class InstallWizard:
         self._pct_label.config(text=f"{pct}%")
         self._highlight_step(p.step)
         self.root.update_idletasks()
+
+    def _clean_and_retry(self) -> None:
+        path = Path(self._target.get().strip())
+        if not path:
+            messagebox.showwarning("安装", "请先选择安装路径。")
+            return
+        if not messagebox.askyesno(
+            "清理并重试",
+            f"将删除该路径下未完成/损坏的 venv 与联接（保留已释放的程序文件与 data/）：\n{path}\n\n继续？",
+        ):
+            return
+        cleaned = cleanup_failed_install(path)
+        msg = "\n".join(cleaned) if cleaned else "（未发现需清理项）"
+        messagebox.showinfo("清理完成", f"{msg}\n\n请点击「开始安装」重新安装。")
+        self._step_title.set("已清理，请点击「开始安装」")
+        self._detail.set("")
 
     def _start_install(self) -> None:
         path = Path(self._target.get().strip())
@@ -191,7 +216,7 @@ class InstallWizard:
 
     def _install_failed(self) -> None:
         self._btn_install.config(state="normal")
-        self._step_title.set("安装失败，可修改路径后重试")
+        self._step_title.set("安装失败 — 可点「清理并重试」后再次安装")
 
     def run(self) -> Path | None:
         self.root.mainloop()

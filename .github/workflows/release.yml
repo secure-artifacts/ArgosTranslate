@@ -39,6 +39,9 @@ jobs:
       - name: Build one-click setup executable
         run: python tools/build_portable_setup.py
 
+      - name: Verify setup exe embeds payload
+        run: dist/ArgosTranslate.exe --check-bundle
+
       - name: Stage release artifacts
         shell: pwsh
         run: |
@@ -61,3 +64,14 @@ jobs:
         with:
           files: dist_final/*
           generate_release_notes: true
+          body: |
+            ## 安装（新用户）
+
+            **只需下载 `ArgosTranslate-*.exe`**，双击后选择安装目录即可完整安装。
+            程序文件已内嵌在安装包中，**无需**再下载 zip。
+
+            首次安装需联网（自动下载 Python 运行环境与翻译组件，约 3～8 分钟）。
+
+            ## zip 更新包
+
+            `ArgosTranslate-*.zip` 供**已安装用户**在软件内「检查更新」时自动下载，新用户请忽略。

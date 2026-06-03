@@ -3,17 +3,28 @@ Argos 本地翻译器 — 安装说明（给用户）
 
 【推荐：只需一个 exe】
   1）下载 Release 中的 ArgosTranslate-vX.Y.Z.exe
-  2）双击 → 选择安装文件夹（如 D:\Apps\ArgosTranslate）
-  3）等待自动安装（首次需联网，约数分钟）
+  2）双击 → 选择安装文件夹（如 D:\Apps\ArgosTranslate 或 F:\本地翻译）
+  3）等待自动安装（首次需联网，约 3～8 分钟；pip 会自动尝试国内镜像）
   4）以后双击同一 exe 即可打开
+
+【安装失败时】
+  安装向导中点「清理并重试」，再点「开始安装」。
+  若仍失败，可手动删除：
+    · 安装目录下的 venv 文件夹
+    · C:\ProgramData\ArgosTranslate\embed-toolchain
+    · C:\ProgramData\ArgosTranslate\venvs
+    · %LOCALAPPDATA%\ArgosTranslate\embed-toolchain（如有）
+    · %LOCALAPPDATA%\ArgosTranslate\venvs（如有）
+
+【Windows 用户名为中文】
+  默认建议安装到 C:\ArgosTranslate 等纯英文路径；
+  程序会自动把 Python 环境放在 C:\ProgramData\ArgosTranslate\。
 
 【更改安装位置】
   软件菜单 →「安装位置…」
-  · 指向已有完整安装文件夹，或
-  · 在空文件夹中重新自动安装
 
 【zip 更新包】
-  供已安装用户就地升级程序文件，新用户请用 exe 安装。
+  供已安装用户在软件内「检查更新」时自动下载，新用户请忽略。
 
 【翻译引擎】
   仅 Argos 强化离线翻译，详见 命令\引擎说明.txt。

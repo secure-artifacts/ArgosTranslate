@@ -74,8 +74,8 @@ def missing_install_message(attempted_root: Path) -> str:
     return (
         "尚未完成安装。\n\n"
         f"当前查找位置：{attempted_root}\n\n"
-        "请使用 Release 中的 ArgosTranslate.exe：\n"
-        "  首次运行会弹出安装向导，选择安装文件夹即可自动配置。\n\n"
+        "请从 GitHub Releases 下载 ArgosTranslate-vX.Y.Z.exe（只需 exe，无需 zip）：\n"
+        "  双击后选择安装文件夹，程序会自动完成配置。\n\n"
         f"安装成功后路径记录在：{pointer}\n"
         "可在软件菜单「安装位置…」中更改。"
     )

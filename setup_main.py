@@ -11,10 +11,18 @@ from win_path_utils import configure_windows_utf8
 configure_windows_utf8()
 
 from portable_paths import find_portable_root, is_install_root, save_install_pointer
-from portable_installer import launch_app
+from portable_installer import launch_app, verify_installer_bundle
 
 
 def main() -> int:
+    if "--check-bundle" in sys.argv:
+        from portable_installer import bundled_payload_zip
+
+        p = bundled_payload_zip()
+        return 0 if p is not None and p.is_file() else 1
+
+    verify_installer_bundle()
+
     root = find_portable_root()
     if not is_install_root(root):
         from install_wizard import run_install_wizard

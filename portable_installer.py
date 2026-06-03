@@ -14,14 +14,19 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 from portable_paths import is_install_root, save_install_pointer
 from portable_updater import UPDATE_REL_PATHS
 from win_path_utils import (
+    cleanup_broken_install,
     configure_windows_utf8,
     embed_toolchain_dir,
     ensure_venv_junction,
-    subprocess_path,
+    path_has_non_ascii,
+    remove_venv_junction,
+    remove_venv_storage,
+    toolchain_cache_hint,
     venv_storage_dir,
 )
 
@@ -57,6 +62,12 @@ _EMBED_PYTHON_URL = (
     f"python-{_EMBED_PYTHON_VERSION}-embed-amd64.zip"
 )
 _GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+_PIP_DEFAULT_TIMEOUT = "180"
+_PIP_MIRROR_INDEXES: tuple[str, ...] = (
+    "https://pypi.tuna.tsinghua.edu.cn/simple",
+    "https://mirrors.aliyun.com/pypi/simple",
+    "https://pypi.org/simple",
+)
 
 
 def dev_source_root() -> Path:
@@ -64,6 +75,7 @@ def dev_source_root() -> Path:
 
 
 def bundled_payload_zip() -> Path | None:
+    """安装 exe 内嵌的程序包（PyInstaller --add-data app_payload.zip）。"""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base = Path(sys._MEIPASS)
         for name in ("app_payload.zip", "payload.zip"):
@@ -74,11 +86,30 @@ def bundled_payload_zip() -> Path | None:
     return zips[0] if zips else None
 
 
+def verify_installer_bundle() -> None:
+    """打包后的安装 exe 必须内嵌 app_payload.zip，否则无法完成首次安装。"""
+    if not getattr(sys, "frozen", False):
+        return
+    if bundled_payload_zip() is None:
+        raise RuntimeError(
+            "安装程序不完整：缺少内嵌程序包。\n"
+            "请从 GitHub Releases 重新下载 ArgosTranslate-vX.Y.Z.exe（只需 exe，无需 zip）。"
+        )
+
+
 def default_install_dir() -> Path:
     local = os.environ.get("LOCALAPPDATA", "").strip()
-    if local:
+    if local and not path_has_non_ascii(local):
         return Path(local) / "ArgosTranslate"
-    return Path.home() / "ArgosTranslate"
+    for cand in (Path(r"C:\ArgosTranslate"), Path.home() / "ArgosTranslate"):
+        if not path_has_non_ascii(cand):
+            return cand
+    return Path(local) / "ArgosTranslate" if local else Path.home() / "ArgosTranslate"
+
+
+def cleanup_failed_install(install_root: Path) -> list[str]:
+    """清理失败安装留下的 venv / 联接，便于用户重试。"""
+    return cleanup_broken_install(install_root.resolve())
 
 
 def _emit(
@@ -179,11 +210,119 @@ def _find_python_launcher() -> list[str] | None:
         ["python3"],
     ):
         try:
-            _run([*cmd, "-c", "import sys; print(sys.version_info[:2])"])
+            _run(
+                [
+                    *cmd,
+                    "-c",
+                    "import sys, venv; "
+                    "assert sys.version_info[:2] >= (3, 10), sys.version",
+                ]
+            )
             return cmd
         except (RuntimeError, FileNotFoundError):
             continue
     return None
+
+
+def _venv_is_usable(py: Path) -> bool:
+    if not py.is_file():
+        return False
+    pyw = py.with_name("pythonw.exe")
+    if not pyw.is_file():
+        return False
+    return _python_can_import(py, "pip")
+
+
+def _pip_index_attempts() -> list[str | None]:
+    custom = os.environ.get("ARGOS_PIP_INDEX_URL", "").strip()
+    seen: set[str] = set()
+    attempts: list[str | None] = []
+    if custom:
+        attempts.append(custom)
+        seen.add(custom.rstrip("/").lower())
+    for url in _PIP_MIRROR_INDEXES:
+        key = url.rstrip("/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        attempts.append(url)
+    return attempts
+
+
+def _pip_install_cmd(py: Path, req: Path, index_url: str | None) -> list[str]:
+    cmd = [
+        str(py),
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        str(req),
+        "--no-warn-script-location",
+        "--default-timeout",
+        _PIP_DEFAULT_TIMEOUT,
+    ]
+    if index_url:
+        host = urlparse(index_url).netloc
+        cmd.extend(["-i", index_url])
+        if host:
+            cmd.extend(["--trusted-host", host])
+    return cmd
+
+
+def _pip_install_package(
+    py: Path,
+    packages: list[str],
+    *,
+    cwd: Path | None,
+    cb: ProgressCb | None,
+    step: int,
+    base_frac: float,
+) -> None:
+    req = Path(packages[0]) if len(packages) == 1 and packages[0].endswith(".txt") else None
+    last_error = ""
+    for index_url in _pip_index_attempts():
+        label = index_url or "pypi.org"
+        _emit(cb, step, base_frac, f"pip → {label}")
+        cmd = (
+            _pip_install_cmd(py, req, index_url)
+            if req
+            else [
+                str(py),
+                "-m",
+                "pip",
+                "install",
+                *packages,
+                "--no-warn-script-location",
+                "--default-timeout",
+                _PIP_DEFAULT_TIMEOUT,
+            ]
+        )
+        if not req and index_url:
+            host = urlparse(index_url).netloc
+            cmd.extend(["-i", index_url])
+            if host:
+                cmd.extend(["--trusted-host", host])
+        try:
+            _run(cmd, cwd=cwd)
+            return
+        except RuntimeError as e:
+            last_error = str(e)
+    raise RuntimeError(
+        "pip 安装失败（已尝试多个镜像源）。\n"
+        f"{last_error}\n\n"
+        "请检查网络连接，或设置环境变量 ARGOS_PIP_INDEX_URL 为可用镜像后重试。"
+    )
+
+
+def _clear_broken_venv(install_root: Path, real_venv: Path, cb: ProgressCb | None) -> None:
+    py_exe = real_venv / "Scripts" / "python.exe"
+    if py_exe.is_file() and _venv_is_usable(py_exe):
+        return
+    if not real_venv.exists() and not (install_root / "venv").exists():
+        return
+    _emit(cb, 2, 0.02, "检测到损坏或未完成的虚拟环境，正在清理…")
+    remove_venv_junction(install_root)
+    remove_venv_storage(install_root)
 
 
 def _enable_embed_site(embed_dir: Path) -> None:
@@ -266,9 +405,13 @@ def _create_venv_with_embed(install_root: Path, real_venv: Path, cb: ProgressCb 
     py = _bootstrap_embed_python(embed, cb)
     py_arg = str(py)
     _emit(cb, 2, 0.78, "正在安装 virtualenv…")
-    _run(
-        [py_arg, "-m", "pip", "install", "virtualenv", "--no-warn-script-location"],
+    _pip_install_package(
+        Path(py_arg),
+        ["virtualenv"],
         cwd=embed,
+        cb=cb,
+        step=2,
+        base_frac=0.78,
     )
     _emit(cb, 2, 0.9, "正在创建虚拟环境…")
     _run([py_arg, "-m", "virtualenv", venv_arg], cwd=embed.parent)
@@ -280,10 +423,11 @@ def _create_venv_with_embed(install_root: Path, real_venv: Path, cb: ProgressCb 
 def _create_venv(install_root: Path, cb: ProgressCb | None) -> Path:
     install_root = install_root.resolve()
     real_venv = venv_storage_dir(install_root)
+    _clear_broken_venv(install_root, real_venv, cb)
     py_exe = real_venv / "Scripts" / "python.exe"
-    if py_exe.is_file():
+    if py_exe.is_file() and _venv_is_usable(py_exe):
         ensure_venv_junction(install_root, real_venv)
-        _emit(cb, 2, 1.0, "虚拟环境已存在，跳过创建。")
+        _emit(cb, 2, 1.0, "虚拟环境已就绪。")
         return py_exe
 
     venv_arg = str(real_venv)
@@ -334,9 +478,12 @@ def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
 
     zpath = bundled_payload_zip()
     if zpath is None:
-        raise RuntimeError("未找到内置程序包 app_payload.zip，请重新下载安装程序。")
+        raise RuntimeError(
+            "未找到内嵌程序包。\n"
+            "请重新下载 Release 中的 ArgosTranslate-vX.Y.Z.exe（只需 exe，无需 zip）。"
+        )
 
-    _emit(cb, 1, 0.05, "正在解压内置程序包…")
+    _emit(cb, 1, 0.05, "正在从内嵌程序包释放文件…")
     tmp = install_root / "_payload_extract"
     if tmp.exists():
         shutil.rmtree(tmp, ignore_errors=True)
@@ -369,40 +516,44 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
         cb,
         3,
         0.05,
-        "正在安装翻译组件（首次约 3～8 分钟，需联网）…",
+        "正在安装翻译组件（首次约 3～8 分钟，需联网，自动尝试国内镜像）…",
     )
-    proc = subprocess.Popen(
-        [
-            str(py),
-            "-m",
-            "pip",
-            "install",
-            "-r",
-            str(req),
-            "--no-warn-script-location",
-        ],
-        cwd=str(install_root),
-        env=_subprocess_env(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+    last_tail = ""
+    for index_url in _pip_index_attempts():
+        label = index_url or "pypi.org"
+        _emit(cb, 3, 0.08, f"pip 源：{label}")
+        cmd = _pip_install_cmd(py, req, index_url)
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(install_root),
+            env=_subprocess_env(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        assert proc.stdout is not None
+        lines = 0
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            lines += 1
+            frac = min(0.95, 0.08 + lines * 0.015)
+            short = line if len(line) <= 72 else line[:69] + "…"
+            _emit(cb, 3, frac, short)
+        code = proc.wait()
+        if code == 0:
+            _emit(cb, 3, 1.0, "翻译依赖安装完成。")
+            return
+        last_tail = f"pip 退出码 {code}（源 {label}）"
+    raise RuntimeError(
+        "pip 安装失败（已尝试清华 / 阿里云 / 官方源）。\n"
+        f"{last_tail}\n\n"
+        "请检查网络，或设置 ARGOS_PIP_INDEX_URL 后重试。\n"
+        "也可点击「清理并重试」后再次安装。"
     )
-    assert proc.stdout is not None
-    lines = 0
-    for line in proc.stdout:
-        line = line.strip()
-        if not line:
-            continue
-        lines += 1
-        frac = min(0.95, 0.08 + lines * 0.015)
-        short = line if len(line) <= 72 else line[:69] + "…"
-        _emit(cb, 3, frac, short)
-    code = proc.wait()
-    if code != 0:
-        raise RuntimeError(f"pip 安装失败，退出码 {code}")
-    _emit(cb, 3, 1.0, "翻译依赖安装完成。")
 
 
 def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> None:
@@ -434,23 +585,29 @@ def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> Non
 def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
     install_root = install_root.resolve()
     _emit(cb, 1, 0.0, f"安装到：{install_root}")
-    _deploy_payload(install_root, cb)
-    py = _create_venv(install_root, cb)
-    _pip_install(py, install_root, cb)
-    _apply_gui_patch(install_root, py, cb)
-    write_version = install_root / "version.json"
-    if not write_version.is_file():
-        try:
-            from app_version import write_version_json
+    try:
+        _deploy_payload(install_root, cb)
+        py = _create_venv(install_root, cb)
+        _pip_install(py, install_root, cb)
+        _apply_gui_patch(install_root, py, cb)
+        write_version = install_root / "version.json"
+        if not write_version.is_file():
+            try:
+                from app_version import write_version_json
 
-            write_version_json(install_root)
-        except Exception:
-            pass
-    if not is_install_root(install_root):
-        raise RuntimeError("安装未完成：缺少 venv 或程序文件。")
-    save_install_pointer(install_root)
-    _emit(cb, 4, 1.0, "安装完成，即将启动软件。")
-    return install_root
+                write_version_json(install_root)
+            except Exception:
+                pass
+        if not is_install_root(install_root):
+            raise RuntimeError("安装未完成：缺少 venv 或程序文件。")
+        save_install_pointer(install_root)
+        _emit(cb, 4, 1.0, "安装完成，即将启动软件。")
+        return install_root
+    except Exception as e:
+        if not is_install_root(install_root):
+            cleanup_broken_install(install_root)
+        hint = toolchain_cache_hint()
+        raise RuntimeError(f"{e}\n\n若仍失败，可手动删除以下缓存后重试：\n{hint}") from e
 
 
 def launch_app(install_root: Path) -> int:
