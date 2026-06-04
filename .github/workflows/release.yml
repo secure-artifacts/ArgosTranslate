@@ -53,6 +53,10 @@ jobs:
           if ($exe) {
             Copy-Item $exe.FullName "dist_final/ArgosTranslate-${{ github.ref_name }}.exe"
           }
+          $wheels = Get-ChildItem dist/*-install_wheels.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($wheels) {
+            Copy-Item $wheels.FullName "dist_final/ArgosTranslate-${{ github.ref_name }}-install_wheels.zip"
+          }
 
       - name: Attest Build Provenance
         uses: actions/attest-build-provenance@v2
@@ -70,7 +74,9 @@ jobs:
             **只需下载 `ArgosTranslate-*.exe`**，双击后选择安装目录即可完整安装。
             程序文件已内嵌在安装包中，**无需**再下载 zip。
 
-            首次安装约 3～10 分钟（PyQt5 / CTranslate2 / PyTorch 已内嵌于 exe，无需联网下载；解压阶段可能长时间无新进度）。
+            首次双击 exe 约 30 秒～2 分钟会出现启动提示（exe 体积已缩小）；安装过程中会自动下载离线依赖包（约 200MB，需联网）。
+
+            完整安装约 15～40 分钟（含语言包；pip 阶段可能长时间无新进度）。
 
             ## zip 更新包
 

@@ -855,7 +855,9 @@ def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
 
 def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
     stage_count = len(_PIP_INSTALL_STAGES)
-    wheels = _bundled_install_wheels_dir()
+    wheels = _resolve_install_wheels_dir(install_root)
+    if wheels is None:
+        wheels = _ensure_install_wheels_available(install_root, cb)
     if wheels is not None:
         _emit(
             cb,
@@ -948,8 +950,61 @@ def _resolve_install_wheels_dir(install_root: Path | None = None) -> Path | None
         return bundled
     if install_root is not None:
         cache = install_root / "data" / "install" / "install_wheels"
-        if cache.is_dir() and any(cache.glob("*.whl")):
+        if cache.is_dir() and any(cache.glob("ctranslate2-*.whl")):
             return cache
+    return None
+
+
+def _install_wheels_download_urls(version: str) -> list[str]:
+    tag = f"v{version.strip().lstrip('v')}"
+    base = f"https://github.com/secure-artifacts/ArgosTranslate/releases/download/{tag}"
+    return [
+        f"{base}/ArgosTranslate-{tag}-install_wheels.zip",
+        f"{base}/install_wheels.zip",
+    ]
+
+
+def _ensure_install_wheels_available(
+    install_root: Path, cb: ProgressCb | None
+) -> Path | None:
+    """内嵌 wheel → 安装目录缓存 → 从 GitHub Release 下载。"""
+    resolved = _resolve_install_wheels_dir(install_root)
+    if resolved is not None:
+        return resolved
+
+    from app_version import APP_VERSION
+
+    cache = install_root / "data" / "install" / "install_wheels"
+    cache.mkdir(parents=True, exist_ok=True)
+    zip_path = install_root / "data" / "install" / "install_wheels.zip"
+    last_err = ""
+    for url in _install_wheels_download_urls(APP_VERSION):
+        try:
+            _emit(
+                cb,
+                3,
+                0.01,
+                "正在下载离线依赖包（约 200MB，仅首次需要；也可改用联网 pip）…",
+            )
+            _download(url, zip_path, cb, step=3, base_frac=0.02, span=0.06)
+            tmp = install_root / "data" / "install" / "_install_wheels_extract"
+            shutil.rmtree(tmp, ignore_errors=True)
+            tmp.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(tmp)
+            for whl in tmp.rglob("*.whl"):
+                target = cache / whl.name
+                if not target.is_file():
+                    shutil.copy2(whl, target)
+            shutil.rmtree(tmp, ignore_errors=True)
+            if any(cache.glob("ctranslate2-*.whl")):
+                _emit(cb, 3, 0.08, "离线依赖包已就绪。")
+                return cache
+        except Exception as e:
+            last_err = str(e)
+            continue
+    if last_err:
+        _emit(cb, 3, 0.02, f"离线依赖包下载未成功，将尝试联网 pip…（{last_err[:80]}）")
     return None
 
 

@@ -58,6 +58,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "install_location_dialog.py",
     "requirements-install.txt",
     "setup_main.py",
+    "setup_boot.py",
     "github_update.py",
     "update_dialog.py",
     "slavic_translation_hints.py",

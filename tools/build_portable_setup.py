@@ -158,6 +158,8 @@ def main() -> int:
         "--paths",
         str(ROOT),
         "--hidden-import",
+        "setup_main",
+        "--hidden-import",
         "portable_installer",
         "--hidden-import",
         "portable_paths",
@@ -180,8 +182,6 @@ def main() -> int:
         "--add-data",
         f"{bootstrap_wheels}{sep}bootstrap_wheels",
         "--add-data",
-        f"{install_wheels}{sep}install_wheels",
-        "--add-data",
         f"{payload_dst}{sep}.",
         "--add-data",
         f"{ROOT / 'assets' / 'app_icon.ico'}{sep}assets",
@@ -192,11 +192,23 @@ def main() -> int:
         "--specpath",
         str(ROOT / "build"),
         *icon_args,
-        str(ROOT / "setup_main.py"),
+        str(ROOT / "setup_boot.py"),
     ]
     print("[INFO]", " ".join(cmd))
     subprocess.check_call(cmd, cwd=str(ROOT))
     built = out_dir / "ArgosTranslate.exe"
+    from app_version import APP_VERSION
+
+    wheels_zip = out_dir / f"ArgosTranslate-v{APP_VERSION}-install_wheels.zip"
+    if install_wheels.is_dir() and any(install_wheels.glob("*.whl")):
+        if wheels_zip.is_file():
+            wheels_zip.unlink()
+        shutil.make_archive(
+            str(wheels_zip.with_suffix("")),
+            "zip",
+            root_dir=str(install_wheels),
+        )
+        print(f"[OK] install_wheels zip -> {wheels_zip}")
     print(f"[OK] {built}")
     print("Users only need this exe: pick install folder, auto setup, then launch.")
     return 0
