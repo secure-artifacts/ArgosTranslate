@@ -92,8 +92,9 @@ class InstallWizard:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("本地翻译器 — 安装")
-        self.root.geometry("560x520")
-        self.root.resizable(False, False)
+        self.root.geometry("560x620")
+        self.root.minsize(520, 560)
+        self.root.resizable(True, True)
         self.root.configure(bg=P["bg"])
         _set_wizard_window_icon(self.root)
         self._style = _apply_ttk_theme(self.root)
@@ -188,8 +189,23 @@ class InstallWizard:
             bg=P["chrome_bg"],
         ).pack(anchor="w", padx=18, pady=(2, 0))
 
+        footer = tk.Frame(self.root, bg=P["bg"])
+        footer.pack(side="bottom", fill="x", padx=16, pady=(0, 14))
+        btn_row = tk.Frame(footer, bg=P["bg"])
+        btn_row.pack(fill="x")
+        self._btn_install = self._button(
+            btn_row, "开始安装", self._start_install, primary=True, width=12
+        )
+        self._btn_install.pack(side="right")
+        self._btn_clean = self._button(
+            btn_row, "清理并重试", self._clean_and_retry, width=12
+        )
+        self._btn_clean.pack(side="right", padx=(0, 8))
+        cancel = self._button(btn_row, "取消", self.root.destroy, width=8)
+        cancel.pack(side="right", padx=(0, 8))
+
         body = tk.Frame(self.root, bg=P["bg"])
-        body.pack(fill="both", expand=True, padx=16, pady=14)
+        body.pack(side="top", fill="both", expand=True, padx=16, pady=14)
 
         card = tk.Frame(
             body,
@@ -328,19 +344,6 @@ class InstallWizard:
             bg=P["surface"],
             wraplength=500,
         )
-
-        btn_row = tk.Frame(body, bg=P["bg"])
-        btn_row.pack(fill="x", pady=(14, 0))
-        self._btn_install = self._button(
-            btn_row, "开始安装", self._start_install, primary=True, width=12
-        )
-        self._btn_install.pack(side="right")
-        self._btn_clean = self._button(
-            btn_row, "清理并重试", self._clean_and_retry, width=12
-        )
-        self._btn_clean.pack(side="right", padx=(0, 8))
-        cancel = self._button(btn_row, "取消", self.root.destroy, width=8)
-        cancel.pack(side="right", padx=(0, 8))
 
     def _browse(self) -> None:
         d = filedialog.askdirectory(
