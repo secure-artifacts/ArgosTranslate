@@ -56,6 +56,12 @@ def apply_data_env(install_root: Path) -> None:
     os.environ["XDG_CACHE_HOME"] = str(install_root / "data" / "cache")
     os.environ["ARGOS_TRANSLATE_HOME"] = str(install_root)
     os.environ.setdefault("PYTHONUTF8", "1")
+    try:
+        from win_path_utils import apply_argos_packages_env
+
+        apply_argos_packages_env(install_root)
+    except ImportError:
+        pass
 
 
 def pair_is_installed(install_root: Path, from_code: str, to_code: str) -> bool:

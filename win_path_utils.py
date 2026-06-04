@@ -204,6 +204,113 @@ def ensure_venv_junction(install_root: Path, real_venv: Path) -> None:
         )
 
 
+def argos_packages_link(install_root: Path) -> Path:
+    return (
+        install_root.resolve()
+        / "data"
+        / "local"
+        / "argos-translate"
+        / "packages"
+    )
+
+
+def argos_packages_storage_dir(install_root: Path) -> Path:
+    """语言包实际目录；非 ASCII 安装路径时放在 ProgramData。"""
+    install_root = install_root.resolve()
+    if not _needs_external_toolchain_store(install_root):
+        link = argos_packages_link(install_root)
+        link.mkdir(parents=True, exist_ok=True)
+        return link
+
+    key = hashlib.sha256(str(install_root).encode("utf-8")).hexdigest()[:16]
+    store = _external_toolchain_store(install_root) / "packages" / key
+    store.mkdir(parents=True, exist_ok=True)
+    marker = store / "install_root.txt"
+    try:
+        marker.write_text(str(install_root), encoding="utf-8")
+    except OSError:
+        pass
+    return store
+
+
+def _copy_tree_merge(src: Path, dst: Path) -> None:
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        target = dst / item.name
+        if item.is_dir():
+            if target.is_dir():
+                _copy_tree_merge(item, target)
+            else:
+                shutil.copytree(item, target, dirs_exist_ok=True)
+        elif item.is_file() and not target.is_file():
+            shutil.copy2(item, target)
+
+
+def ensure_packages_junction(install_root: Path) -> Path:
+    """
+    语言包目录联接：SentencePiece/CTranslate2 无法打开中文路径下的 model 文件。
+    返回实际 packages 目录（供 ARGOS_PACKAGES_DIR）。
+    """
+    install_root = install_root.resolve()
+    real = argos_packages_storage_dir(install_root)
+    if not _needs_external_toolchain_store(install_root):
+        return real
+
+    link = argos_packages_link(install_root)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.exists() or link.is_symlink():
+        if _same_path(link, real):
+            return real
+        if link.is_dir() and not link.is_symlink():
+            try:
+                if any(link.iterdir()):
+                    _copy_tree_merge(link, real)
+            except OSError:
+                pass
+            shutil.rmtree(link, ignore_errors=True)
+        else:
+            try:
+                link.unlink()
+            except OSError:
+                shutil.rmtree(link, ignore_errors=True)
+
+    real.mkdir(parents=True, exist_ok=True)
+    if sys.platform != "win32":
+        link.symlink_to(real, target_is_directory=True)
+        return real
+
+    r = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(real)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **subprocess_hide_window_kwargs(),
+    )
+    if r.returncode != 0 and not _same_path(link, real):
+        tail = (r.stderr or r.stdout or "").strip()
+        raise RuntimeError(
+            "无法为语言包创建目录联接（中文安装路径必需）。\n"
+            f"{link}\n→ {real}\n{tail}"
+        )
+    return real
+
+
+def apply_argos_packages_env(install_root: Path, env: dict[str, str] | None = None) -> Path:
+    """设置 ARGOS_PACKAGES_DIR，并在已 import 时同步 argostranslate.settings。"""
+    target = env if env is not None else os.environ
+    pkg_dir = ensure_packages_junction(install_root)
+    target["ARGOS_PACKAGES_DIR"] = str(pkg_dir)
+    try:
+        import argostranslate.settings as s
+
+        s.package_data_dir = Path(pkg_dir)
+        os.makedirs(s.package_data_dir, exist_ok=True)
+    except ImportError:
+        pass
+    return pkg_dir
+
+
 def subprocess_path(path: Path | str) -> str:
     """传给 subprocess 的路径（普通 Unicode 字符串，不用 \\\\?\\ 前缀）。"""
     return str(Path(path).resolve())

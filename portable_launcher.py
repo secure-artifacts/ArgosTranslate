@@ -54,6 +54,12 @@ def _apply_portable_env(root: Path) -> dict[str, str]:
     env.setdefault("OMP_NUM_THREADS", "1")
     env["ARGOS_TRANSLATE_HOME"] = str(root.resolve())
     try:
+        from win_path_utils import apply_argos_packages_env
+
+        apply_argos_packages_env(root, env)
+    except ImportError:
+        pass
+    try:
         from native_dll_bootstrap import runtime_env_for_root
 
         env.update(runtime_env_for_root(root))
@@ -94,6 +100,12 @@ def _set_windows_app_user_model_id() -> None:
 def _bootstrap_for_gui(root: Path) -> None:
     os.chdir(root)
     os.environ["ARGOS_TRANSLATE_HOME"] = str(root.resolve())
+    try:
+        from win_path_utils import apply_argos_packages_env
+
+        apply_argos_packages_env(root)
+    except ImportError:
+        pass
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     try:

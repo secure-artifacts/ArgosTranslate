@@ -1199,6 +1199,12 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
         py = _create_venv(install_root, cb)
         _pip_install(py, install_root, cb)
         _persist_install_wheels_cache(install_root)
+        try:
+            from win_path_utils import ensure_packages_junction
+
+            ensure_packages_junction(install_root)
+        except ImportError:
+            pass
         _ensure_language_packages(install_root, py, cb)
         _apply_gui_patch(install_root, py, cb)
         write_version = install_root / "version.json"
