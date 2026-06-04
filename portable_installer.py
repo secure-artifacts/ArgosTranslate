@@ -45,6 +45,7 @@ INSTALL_STEP_TITLES: tuple[str, ...] = (
     "释放程序文件",
     "创建虚拟环境 (venv)",
     "安装翻译依赖 (pip)",
+    "安装语言包",
     "应用界面补丁",
 )
 INSTALL_STEP_COUNT = len(INSTALL_STEP_TITLES)
@@ -1042,16 +1043,81 @@ def apply_gui_patch_to_venv(install_root: Path) -> bool:
         return False
 
 
+def _ensure_language_packages(
+    install_root: Path, py: Path, cb: ProgressCb | None
+) -> None:
+    script = install_root / "ensure_language_packages.py"
+    if not script.is_file():
+        _sync_missing_payload_files(install_root, cb)
+    if not script.is_file():
+        _emit(
+            cb,
+            4,
+            1.0,
+            "未找到语言包安装脚本，请稍后在软件内「管理语言包」中下载。",
+        )
+        return
+
+    def _progress(frac: float, msg: str) -> None:
+        _emit(cb, 4, max(0.0, min(1.0, frac)), msg)
+
+    env = _subprocess_env(
+        {
+            "XDG_DATA_HOME": str(install_root / "data" / "local"),
+            "XDG_CONFIG_HOME": str(install_root / "data" / "config"),
+            "XDG_CACHE_HOME": str(install_root / "data" / "cache"),
+            "ARGOS_TRANSLATE_HOME": str(install_root.resolve()),
+        }
+    )
+
+    try:
+        from ensure_language_packages import ensure_default_language_packages
+
+        ensure_default_language_packages(
+            install_root,
+            py,
+            progress=_progress,
+            skip_if_sufficient=True,
+        )
+    except ImportError:
+        _emit(cb, 4, 0.05, "正在安装语言包（首次需联网，约 10～40 分钟）…")
+        _run(
+            [str(py), str(script), str(install_root)],
+            cwd=install_root,
+            env=env,
+        )
+        _emit(cb, 4, 1.0, "语言包安装完成。")
+    except Exception as e:
+        try:
+            from ensure_language_packages import has_usable_language_packages
+        except ImportError:
+            has_usable_language_packages = None  # type: ignore[assignment,misc]
+        if has_usable_language_packages and has_usable_language_packages(install_root):
+            _emit(
+                cb,
+                4,
+                1.0,
+                f"部分语言包未安装（{e}），可在软件内继续下载。",
+            )
+            return
+        if _is_network_error(e):
+            raise
+        raise RuntimeError(
+            f"语言包安装失败：{e}\n\n"
+            "请确认网络畅通后重试，或安装完成后在软件内点「管理语言包 → 下载语言包」。"
+        ) from e
+
+
 def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> None:
-    _emit(cb, 4, 0.1, "正在应用界面补丁…")
+    _emit(cb, 5, 0.1, "正在应用界面补丁…")
     if apply_gui_patch_to_venv(install_root):
-        _emit(cb, 4, 1.0, "界面补丁已应用。")
+        _emit(cb, 5, 1.0, "界面补丁已应用。")
         return
     patch = install_root / "patches" / "argostranslategui_gui.py"
     if not patch.is_file():
         _sync_missing_payload_files(install_root, cb)
     if apply_gui_patch_to_venv(install_root):
-        _emit(cb, 4, 1.0, "界面补丁已应用。")
+        _emit(cb, 5, 1.0, "界面补丁已应用。")
         return
     if not patch.is_file():
         raise RuntimeError(
@@ -1064,9 +1130,9 @@ def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> Non
             [str(py), str(tool), "--force"],
             cwd=install_root,
         )
-        _emit(cb, 4, 1.0, "界面补丁已应用。")
+        _emit(cb, 5, 1.0, "界面补丁已应用。")
         return
-    _emit(cb, 4, 1.0, "未找到补丁工具，已跳过。")
+    _emit(cb, 5, 1.0, "未找到补丁工具，已跳过。")
 
 
 def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
@@ -1077,6 +1143,7 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
         py = _create_venv(install_root, cb)
         _pip_install(py, install_root, cb)
         _persist_install_wheels_cache(install_root)
+        _ensure_language_packages(install_root, py, cb)
         _apply_gui_patch(install_root, py, cb)
         write_version = install_root / "version.json"
         if not write_version.is_file():
@@ -1102,7 +1169,7 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
             create_start_menu_shortcut(install_root)
         except Exception:
             pass
-        _emit(cb, 4, 1.0, "安装完成，即将启动软件。")
+        _emit(cb, 5, 1.0, "安装完成，即将启动软件。")
         return install_root
     except Exception as e:
         if not is_install_root(install_root):

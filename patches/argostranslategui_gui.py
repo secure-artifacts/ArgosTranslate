@@ -623,6 +623,59 @@ class LanguageLoadWorker(QThread):
             self.failed.emit("未在 data\\local 下找到可用的语言包 metadata。")
 
 
+class LanguagePackagesInstallWorker(QThread):
+    """后台下载并安装默认语言包。"""
+
+    status = pyqtSignal(str)
+    finished_result = pyqtSignal(bool, str)
+
+    def __init__(self, portable_root: Path, parent=None):
+        super().__init__(parent)
+        self._portable_root = portable_root
+
+    def run(self) -> None:
+        root = self._portable_root
+        py = root / "venv" / "Scripts" / "python.exe"
+        script = root / "ensure_language_packages.py"
+        if not py.is_file():
+            self.finished_result.emit(False, f"未找到 Python：{py}")
+            return
+        if not script.is_file():
+            self.finished_result.emit(False, "未找到 ensure_language_packages.py，请检查更新。")
+            return
+        try:
+            if str(root) not in sys.path:
+                sys.path.insert(0, str(root))
+            from ensure_language_packages import ensure_default_language_packages
+
+            def _progress(frac: float, msg: str) -> None:
+                self.status.emit(msg)
+
+            ensure_default_language_packages(
+                root,
+                py,
+                progress=_progress,
+                skip_if_sufficient=False,
+            )
+            self.finished_result.emit(True, "语言包安装完成，正在刷新界面…")
+        except Exception as e:
+            self.finished_result.emit(False, str(e))
+
+
+def _is_missing_language_pack_error(msg: str) -> bool:
+    text = (msg or "").strip()
+    if not text:
+        return False
+    markers = (
+        "metadata",
+        "未在 data",
+        "语言包",
+        "no installed",
+    )
+    lower = text.lower()
+    return any(m.lower() in lower for m in markers)
+
+
 class VcredistInstallWorker(QThread):
     """后台下载并安装 Microsoft VC++ 2015-2022 x64（官方全球 CDN）。"""
 
@@ -1718,8 +1771,86 @@ class GUIWindow(QMainWindow):
             tab.right_textEdit.setPlaceholderText("语言包加载失败，请检查 data\\local 下的模型。")
         if _is_torch_dll_init_error(msg):
             self._handle_torch_engine_failure(msg)
-        else:
-            QMessageBox.warning(self, _app_display_name(), f"加载语言包失败：\n{msg}")
+            return
+        if _is_missing_language_pack_error(msg):
+            self._offer_language_packages_download(msg)
+            return
+        QMessageBox.warning(self, _app_display_name(), f"加载语言包失败：\n{msg}")
+
+    def _offer_language_packages_download(self, error_text: str = "") -> None:
+        if self._portable_root is None:
+            QMessageBox.warning(
+                self,
+                _app_display_name(),
+                "尚未安装翻译语言包。\n\n"
+                "请在菜单中打开「管理语言包 → 下载语言包」，或重新运行安装程序。",
+            )
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle(_app_display_name())
+        box.setText(
+            "尚未安装翻译语言包（俄语 / 乌克兰语 / 英语 / 中文等）。\n\n"
+            "是否现在自动下载？首次约需 10～40 分钟，请保持网络畅通。\n"
+            "（下载源为 pypi.org 与芬兰 CSC，不使用中国大陆镜像。）"
+        )
+        if error_text:
+            short = error_text if len(error_text) < 800 else error_text[:800] + "…"
+            box.setDetailedText(short)
+        btn_dl = box.addButton("自动下载", QMessageBox.AcceptRole)
+        btn_mgr = box.addButton("手动管理", QMessageBox.ActionRole)
+        box.addButton("稍后", QMessageBox.RejectRole)
+        box.exec_()
+        clicked = box.clickedButton()
+        if clicked == btn_mgr:
+            self.manage_packages_action_triggered()
+            return
+        if clicked != btn_dl:
+            return
+        self._start_language_packages_install()
+
+    def _start_language_packages_install(self) -> None:
+        if self._portable_root is None:
+            return
+        if getattr(self, "_langpack_install_worker", None) is not None:
+            return
+        for tab in self._iter_tabs():
+            tab.right_textEdit.setPlaceholderText("正在下载语言包，请稍候…")
+            tab.left_language_combo.setEnabled(False)
+            tab.right_language_combo.setEnabled(False)
+        self._langpack_install_worker = LanguagePackagesInstallWorker(self._portable_root)
+        self._langpack_install_worker.status.connect(self._on_language_packages_install_status)
+        self._langpack_install_worker.finished_result.connect(
+            self._on_language_packages_install_finished
+        )
+        self._langpack_install_worker.start()
+
+    def _on_language_packages_install_status(self, msg: str) -> None:
+        for tab in self._iter_tabs():
+            tab.right_textEdit.setPlaceholderText(msg or "正在下载语言包…")
+
+    def _on_language_packages_install_finished(self, ok: bool, msg: str) -> None:
+        self._langpack_install_worker = None
+        if ok:
+            QMessageBox.information(self, _app_display_name(), msg)
+            self.load_languages()
+            return
+        for tab in self._iter_tabs():
+            tab.left_language_combo.setEnabled(True)
+            tab.right_language_combo.setEnabled(True)
+            tab.right_textEdit.setPlaceholderText("语言包下载失败。")
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle(_app_display_name())
+        box.setText(f"语言包下载失败：\n{msg}")
+        btn_retry = box.addButton("重试", QMessageBox.AcceptRole)
+        btn_mgr = box.addButton("手动管理", QMessageBox.ActionRole)
+        box.addButton("关闭", QMessageBox.RejectRole)
+        box.exec_()
+        if box.clickedButton() == btn_retry:
+            self._start_language_packages_install()
+        elif box.clickedButton() == btn_mgr:
+            self.manage_packages_action_triggered()
 
     def _show_engine_restart_required(self, error_text: str = "") -> None:
         """运行库已装或已执行过安装：提示重启，不再重复下载。"""

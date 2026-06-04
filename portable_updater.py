@@ -95,6 +95,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "terminology_registry.py",
     "requirements-corpus-rerank.txt",
     "language_catalog.py",
+    "ensure_language_packages.py",
     "native_dll_bootstrap.py",
     "wiktionary_parser.py",
     "word_info_dialog.py",
@@ -105,6 +106,8 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "startup_warmup.py",
     "vcredist_helper.py",
     "tools/apply_portable_gui_patch.py",
+    "tools/build_ru_uk_from_opus_zip.py",
+    "tools/build_uk_ru_from_opus_zip.py",
     "patches/argostranslategui_gui.py",
     "命令",
 )

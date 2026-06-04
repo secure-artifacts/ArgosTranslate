@@ -99,6 +99,25 @@ def _opus_to_ct2(opus_dir: Path, ct2_dir: Path) -> Path:
     return Path(spm)
 
 
+def _stanza_resources() -> Path:
+    for rel in (
+        "translate-ru_en-1_9/stanza/resources.json",
+        "translate-ru_en-1_0/stanza/resources.json",
+    ):
+        p = _ROOT / "data/local/argos-translate/packages" / rel
+        if p.is_file():
+            return p
+    root = _ROOT / "data/local/argos-translate/packages"
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if not child.name.startswith("translate-ru_en"):
+                continue
+            p = child / "stanza" / "resources.json"
+            if p.is_file():
+                return p
+    raise FileNotFoundError("no stanza/resources.json in installed ru→en package")
+
+
 def _install(pkg_root: Path) -> None:
     os.environ.setdefault("XDG_DATA_HOME", str(_ROOT / "data" / "local"))
     import argostranslate.package as pkg
@@ -142,10 +161,7 @@ def main() -> int:
     shutil.copy2(spm_src, pkg_root / "sentencepiece.model")
     shutil.copytree(ct2_dir, pkg_root / "model")
 
-    stanza_src = (
-        _ROOT
-        / "data/local/argos-translate/packages/translate-ru_en-1_9/stanza/resources.json"
-    )
+    stanza_src = _stanza_resources()
     (pkg_root / "stanza").mkdir()
     shutil.copy2(stanza_src, pkg_root / "stanza" / "resources.json")
 
