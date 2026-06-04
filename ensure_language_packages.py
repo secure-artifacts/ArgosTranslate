@@ -112,11 +112,12 @@ def missing_custom_pairs(install_root: Path) -> list[tuple[str, str]]:
 
 def _install_index_pair(py: Path, install_root: Path, from_code: str, to_code: str) -> None:
     install_root = install_root.resolve()
+    root_str = str(install_root)
     code = f"""
 import os
 from pathlib import Path
 
-install_root = Path({install_root!r})
+install_root = Path({root_str!r})
 os.environ["XDG_DATA_HOME"] = str(install_root / "data" / "local")
 os.environ["XDG_CONFIG_HOME"] = str(install_root / "data" / "config")
 os.environ["XDG_CACHE_HOME"] = str(install_root / "data" / "cache")
