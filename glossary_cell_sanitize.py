@@ -58,4 +58,30 @@ def parse_clipboard_table(text: str) -> list[list[str]]:
         cells = [sanitize_glossary_cell(c) for c in row]
         if any(cells):
             rows.append(cells)
+    return expand_single_column_multiline_rows(rows)
+
+
+def expand_single_column_multiline_rows(
+    rows: list[list[str]],
+) -> list[list[str]]:
+    """
+    单列多行粘贴、或单格内含换行（Google 表格 Alt+Enter）时展开为多行。
+    """
+    if not rows:
+        return []
+    max_cols = max(len(r) for r in rows)
+    if max_cols != 1:
+        return rows
+    if len(rows) == 1:
+        inner = rows[0][0]
+        if "\n" not in inner:
+            return rows
+        lines = [
+            sanitize_glossary_cell(ln)
+            for ln in inner.split("\n")
+            if sanitize_glossary_cell(ln)
+        ]
+        return [[ln] for ln in lines] if len(lines) > 1 else rows
+    if len(rows) > 1:
+        return rows
     return rows

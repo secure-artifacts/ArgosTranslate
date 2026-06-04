@@ -21,9 +21,10 @@ import terminology_bridge as tb
 from glossary_manager import GlossaryStore, infer_pos_for_target
 from glossary_cell_sanitize import parse_clipboard_table, sanitize_glossary_cell
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QEvent, QTimer
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import (
+    QAbstractItemDelegate,
     QAbstractItemView,
     QApplication,
     QComboBox,
@@ -32,6 +33,7 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QShortcut,
@@ -111,39 +113,105 @@ class GlossaryPasteTableWidget(QTableWidget):
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.setWordWrap(True)
         hdr = self.horizontalHeader()
         hdr.setStretchLastSection(True)
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)
         if columns > 1:
             hdr.setSectionResizeMode(1, QHeaderView.Stretch)
-        self.verticalHeader().setDefaultSectionSize(28)
+        vhdr = self.verticalHeader()
+        vhdr.setDefaultSectionSize(36)
+        vhdr.setSectionResizeMode(QHeaderView.ResizeToContents)
+        self._row_resize_timer = QTimer(self)
+        self._row_resize_timer.setSingleShot(True)
+        self._row_resize_timer.timeout.connect(self._resize_rows_for_contents)
+        self.itemChanged.connect(self._schedule_row_resize)
+
+    @staticmethod
+    def _make_item(text: str) -> QTableWidgetItem:
+        t = text or ""
+        it = QTableWidgetItem(t)
+        it.setToolTip(t)
+        it.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
+        return it
+
+    def _set_cell(self, row: int, col: int, text: str) -> None:
+        self.setItem(row, col, self._make_item(text))
+
+    def _schedule_row_resize(self, *_args) -> None:
+        self._row_resize_timer.start(0)
+
+    def _resize_rows_for_contents(self) -> None:
+        self.resizeRowsToContents()
+        for r in range(self.rowCount()):
+            self.setRowHeight(r, max(self.rowHeight(r), 36))
 
     def _cell_text(self, row: int, col: int) -> str:
         it = self.item(row, col)
         return sanitize_glossary_cell(it.text() if it else "")
+
+    def _close_cell_editor(self, *, revert: bool = True) -> None:
+        if self.state() != QAbstractItemView.EditingState:
+            return
+        editor = QApplication.focusWidget()
+        if editor is None:
+            return
+        hint = (
+            QAbstractItemDelegate.RevertModelCache
+            if revert
+            else QAbstractItemDelegate.SubmitModelCache
+        )
+        self.closeEditor(editor, hint)
 
     def paste_from_clipboard(self) -> bool:
         clip = QApplication.clipboard().text()
         rows = parse_clipboard_table(clip)
         if not rows:
             return False
+        self._close_cell_editor(revert=True)
         indexes = self.selectedIndexes()
         if indexes:
             start_row = min(i.row() for i in indexes)
             start_col = min(i.column() for i in indexes)
         else:
-            start_row = 0
-            start_col = 0
+            start_row = max(0, self.currentRow())
+            start_col = max(0, self.currentColumn())
+        max_cols = max(len(r) for r in rows)
+        single_col = max_cols == 1 and len(rows) > 1
+        anchor_src = ""
+        if single_col and start_col >= 1:
+            anchor_src = self._cell_text(start_row, 0)
         need = start_row + len(rows)
         while self.rowCount() < need:
             self.insertRow(self.rowCount())
         for i, row_cells in enumerate(rows):
+            r = start_row + i
             for j, cell in enumerate(row_cells):
                 col = start_col + j
                 if col >= self.columnCount():
                     break
-                self.setItem(start_row + i, col, QTableWidgetItem(cell))
+                self._set_cell(r, col, cell)
+            if single_col and start_col >= 1 and anchor_src:
+                if not self._cell_text(r, 0):
+                    self._set_cell(r, 0, anchor_src)
+        self._resize_rows_for_contents()
         return True
+
+    def editItem(self, item: QTableWidgetItem) -> None:
+        super().editItem(item)
+        editor = QApplication.focusWidget()
+        if editor is not None:
+            editor.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if (
+            event.type() == QEvent.KeyPress
+            and event.matches(QKeySequence.Paste)
+            and isinstance(watched, QLineEdit)
+        ):
+            if self.paste_from_clipboard():
+                return True
+        return super().eventFilter(watched, event)
 
     def keyPressEvent(self, event) -> None:
         if event.matches(QKeySequence.Paste):
@@ -532,14 +600,17 @@ class GlossaryEditorDialog(QDialog):
         try:
             self.table.setRowCount(n)
             for row, (src, tgt_show) in enumerate(display_rows):
-                self.table.setItem(row, 0, QTableWidgetItem(src))
-                self.table.setItem(row, 1, QTableWidgetItem(tgt_show))
+                self.table.setItem(row, 0, GlossaryPasteTableWidget._make_item(src))
+                self.table.setItem(
+                    row, 1, GlossaryPasteTableWidget._make_item(tgt_show)
+                )
             last = n - 1
-            self.table.setItem(last, 0, QTableWidgetItem(""))
-            self.table.setItem(last, 1, QTableWidgetItem(""))
+            self.table.setItem(last, 0, GlossaryPasteTableWidget._make_item(""))
+            self.table.setItem(last, 1, GlossaryPasteTableWidget._make_item(""))
         finally:
             self.table.setUpdatesEnabled(True)
             self.table.blockSignals(False)
+        self.table._resize_rows_for_contents()
 
     def delete_selected_rows(self) -> None:
         rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
@@ -721,7 +792,14 @@ class GlossaryEditorDialog(QDialog):
                 continue
             if src not in src_tgts:
                 src_tgts[src] = []
-            src_tgts[src].append(tgt_raw)
+            parts = [
+                sanitize_glossary_cell(p)
+                for p in tgt_raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                if sanitize_glossary_cell(p)
+            ]
+            if not parts:
+                continue
+            src_tgts[src].extend(parts)
 
         multi_row = 0
         for src, tgts in src_tgts.items():

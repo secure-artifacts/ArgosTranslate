@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -99,6 +100,8 @@ class GlossaryChoicePopup(QFrame):
             btn = QPushButton(label)
             btn.setObjectName("glossaryAltBtn")
             btn.setCursor(Qt.PointingHandCursor)
+            btn.setMinimumWidth(280)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
             if i == chosen_index:
                 btn.setStyleSheet(
                     "font-weight: 600; color: #1A73E8; background: #E8F0FE;"
