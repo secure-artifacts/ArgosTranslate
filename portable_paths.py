@@ -29,6 +29,55 @@ def missing_runtime_files(install_root: Path) -> list[str]:
     return [name for name in REQUIRED_RUNTIME_FILES if not (root / name).is_file()]
 
 
+def resolve_install_root() -> Path | None:
+    """
+    解析便携版安装根目录。
+    venv 联接在 ProgramData 时，gui.py 的 __file__ 在联接目标内，不能靠向上 walk。
+    """
+    def ok(path: Path) -> bool:
+        try:
+            return is_install_root(path)
+        except OSError:
+            return False
+
+    custom = os.environ.get("ARGOS_TRANSLATE_HOME", "").strip()
+    if custom:
+        p = Path(custom).expanduser()
+        if ok(p):
+            return p.resolve()
+
+    saved = load_install_pointer()
+    if saved is not None:
+        return saved
+
+    try:
+        cwd = Path.cwd()
+        if ok(cwd):
+            return cwd.resolve()
+    except OSError:
+        pass
+
+    for entry in list(sys.path):
+        if not entry:
+            continue
+        try:
+            p = Path(entry)
+            if ok(p):
+                return p.resolve()
+        except OSError:
+            continue
+
+    start = Path(__file__).resolve().parent
+    cur = start
+    for _ in range(12):
+        if ok(cur):
+            return cur.resolve()
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    return None
+
+
 def install_pointer_path() -> Path:
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("USERPROFILE") or "."
     return Path(base) / "ArgosTranslatePortable" / "install_path.txt"
@@ -56,15 +105,9 @@ def save_install_pointer(target: Path) -> None:
 
 
 def find_portable_root(start: Path | None = None) -> Path:
-    custom = os.environ.get("ARGOS_TRANSLATE_HOME", "").strip()
-    if custom:
-        p = Path(custom).expanduser()
-        if is_install_root(p):
-            return p.resolve()
-
-    saved = load_install_pointer()
-    if saved is not None:
-        return saved
+    resolved = resolve_install_root()
+    if resolved is not None:
+        return resolved
 
     if start is None:
         if getattr(sys, "frozen", False):

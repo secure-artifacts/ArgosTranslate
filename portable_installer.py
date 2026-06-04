@@ -1002,6 +1002,7 @@ def launch_app(install_root: Path) -> int:
     env["XDG_DATA_HOME"] = str(install_root / "data" / "local")
     env["XDG_CONFIG_HOME"] = str(install_root / "data" / "config")
     env["XDG_CACHE_HOME"] = str(install_root / "data" / "cache")
+    env["ARGOS_TRANSLATE_HOME"] = str(install_root.resolve())
     try:
         from native_dll_bootstrap import runtime_env_for_root
 

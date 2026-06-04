@@ -161,33 +161,28 @@ def _is_zh_family_source(code: str | None) -> bool:
 
 
 def _portable_bundle_root() -> Path | None:
-    """便携版安装根目录（优先 install_path.txt，避免从 site-packages 误判）。"""
+    """便携版安装根目录（venv 在 ProgramData 联接时不能依赖 gui.py 的 __file__）。"""
+    try:
+        from portable_paths import resolve_install_root
+
+        return resolve_install_root()
+    except ImportError:
+        pass
     custom = os.environ.get("ARGOS_TRANSLATE_HOME", "").strip()
     if custom:
         root = Path(custom).expanduser()
-        if (root / "terminology_bridge.py").is_file():
-            return root.resolve()
-    try:
-        from portable_paths import find_portable_root, is_install_root, load_install_pointer
-
-        saved = load_install_pointer()
-        if saved is not None:
-            return saved
-        root = find_portable_root()
-        if is_install_root(root):
-            return root.resolve()
-    except ImportError:
-        pass
-    here = Path(__file__).resolve()
-    for i in range(2, 12):
-        try:
-            root = here.parents[i]
-        except IndexError:
-            break
         if (root / "terminology_bridge.py").is_file() and (
             root / "venv" / "Scripts" / "pythonw.exe"
         ).is_file():
-            return root
+            return root.resolve()
+    try:
+        cwd = Path.cwd()
+        if (cwd / "terminology_bridge.py").is_file() and (
+            cwd / "venv" / "Scripts" / "pythonw.exe"
+        ).is_file():
+            return cwd.resolve()
+    except OSError:
+        pass
     return None
 
 
@@ -1149,6 +1144,10 @@ class GUIWindow(QMainWindow):
         self._deferred_active_tab = 0
         self._tabs = []
         self._tab_serial = 0
+        if self._portable_root is not None and str(self._portable_root) not in sys.path:
+            sys.path.insert(0, str(self._portable_root))
+        global _translation_tab_page_cls
+        _translation_tab_page_cls = None
         self._tab_cls = _get_translation_tab_page_class()
         self._ui_session_mod = _get_ui_session_module()
         self._session_restore = None
@@ -1281,10 +1280,19 @@ class GUIWindow(QMainWindow):
         self.setWindowTitle(_app_display_name())
 
         if self._tab_cls is None:
+            hint = QLabel(
+                "程序文件不完整，无法加载翻译界面。\n\n"
+                "请用最新版 ArgosTranslate-vX.Y.Z.exe 双击运行一次（会自动补全文件），\n"
+                "或在安装向导中点击「清理并重试」后重新安装。"
+            )
+            hint.setWordWrap(True)
+            hint.setAlignment(Qt.AlignCenter)
+            self._tab_widget.addTab(hint, "需要修复")
             QMessageBox.warning(
                 self,
                 _app_display_name(),
-                "未找到 translation_tab_page.py，无法启用多标签。",
+                "未找到 translation_tab_page.py，无法启用多标签。\n\n"
+                "请运行最新安装 exe 补全文件，或清理后重装。",
             )
         else:
             tabs_data = []

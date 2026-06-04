@@ -52,6 +52,7 @@ def _apply_portable_env(root: Path) -> dict[str, str]:
     env.setdefault("CTRANSLATE2_LOG_LEVEL", "ERROR")
     env.setdefault("ARGOS_DEVICE_TYPE", "cpu")
     env.setdefault("OMP_NUM_THREADS", "1")
+    env["ARGOS_TRANSLATE_HOME"] = str(root.resolve())
     try:
         from native_dll_bootstrap import runtime_env_for_root
 
@@ -148,7 +149,7 @@ def _bootstrap_for_gui(root: Path) -> None:
             if spec is not None and spec.loader is not None:
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
-                mod.apply()
+                mod.apply(force=True)
     except Exception:
         pass
 
