@@ -102,6 +102,9 @@ def _bootstrap_for_gui(root: Path) -> None:
 
         if missing_runtime_files(root):
             repair_missing_payload_files(root)
+        from portable_installer import ensure_lookup_python_deps
+
+        ensure_lookup_python_deps(root)
     except ImportError:
         pass
     try:

@@ -76,6 +76,13 @@ _PIP_IDLE_HEARTBEAT_SEC = 15
 _PIP_INSTALL_STAGES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("PyQt5 界面库", ("PyQt5>=5.15.0",)),
     (
+        "词典与网络请求",
+        (
+            "beautifulsoup4>=4.12.0",
+            "requests>=2.31.0",
+        ),
+    ),
+    (
         "形态分析组件",
         (
             "pymorphy2>=0.9.0",
@@ -853,6 +860,7 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
         )
     stage_idle_hints = {
         "PyQt5 界面库": "正在解压 PyQt5（体积较大，可能数分钟无新输出）",
+        "词典与网络请求": "正在安装 beautifulsoup4 / requests（查词功能需要）",
         "形态分析组件": "正在安装 pymorphy2 词典",
         "CTranslate2 核心": "正在解压 CTranslate2（约 1～3 分钟无新输出属正常）",
         "Argos 翻译组件": "正在安装 Argos / Stanza / PyTorch（解压最慢，请耐心等待）",
@@ -913,7 +921,55 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
             )
     except ImportError:
         pass
+    for mod in ("bs4", "requests"):
+        if not _python_can_import(py, mod, cwd=install_root):
+            raise RuntimeError(
+                f"依赖 {mod} 未安装成功（查词功能需要 beautifulsoup4 / requests）。\n"
+                "请点击「清理并重试」重新安装。"
+            )
     _emit(cb, 3, 1.0, "翻译依赖安装完成。")
+
+
+def ensure_lookup_python_deps(install_root: Path) -> None:
+    """已安装用户缺 bs4/requests 时静默补装（查词模块 import 需要）。"""
+    py = install_root / "venv" / "Scripts" / "python.exe"
+    if not py.is_file():
+        return
+    need: list[str] = []
+    if not _python_can_import(py, "bs4", cwd=install_root):
+        need.append("beautifulsoup4>=4.12.0")
+    if not _python_can_import(py, "requests", cwd=install_root):
+        need.append("requests>=2.31.0")
+    if not need:
+        return
+    wheels = _bundled_install_wheels_dir()
+    if wheels is None:
+        cache = install_root / "data" / "install" / "install_wheels"
+        if cache.is_dir() and any(cache.glob("*.whl")):
+            wheels = cache
+    attempts: list[tuple[str, str, bool]] = []
+    if wheels is not None:
+        attempts.append(("内置离线包", "", True))
+    for index_url in _pip_index_attempts():
+        src = urlparse(index_url).netloc if index_url else "pypi.org"
+        attempts.append((src, index_url, False))
+    for _src, index_url, offline in attempts:
+        cmd = _pip_packages_cmd(
+            py,
+            tuple(need),
+            index_url,
+            wheels_dir=wheels,
+            offline=offline,
+        )
+        try:
+            _run(cmd, cwd=install_root)
+            if all(
+                _python_can_import(py, m, cwd=install_root)
+                for m in ("bs4", "requests")
+            ):
+                return
+        except RuntimeError:
+            continue
 
 
 def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> None:

@@ -12,6 +12,7 @@ configure_windows_utf8()
 
 from portable_paths import find_portable_root, is_install_root, save_install_pointer
 from portable_installer import (
+    ensure_lookup_python_deps,
     launch_app,
     persist_payload_cache,
     repair_missing_payload_files,
@@ -54,6 +55,10 @@ def main() -> int:
         zpath = resolve_payload_zip(root)
         if zpath is not None:
             persist_payload_cache(root, zpath)
+        try:
+            ensure_lookup_python_deps(root)
+        except Exception:
+            pass
 
     save_install_pointer(root)
     return launch_app(root)
