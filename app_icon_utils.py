@@ -39,6 +39,45 @@ def find_app_icon(root: Path | None) -> Path | None:
     return None
 
 
+def ensure_shortcut_icon(install_root: Path) -> Path | None:
+    """
+    复制图标到纯 ASCII 目录（ProgramData\\ArgosTranslate）。
+    cscript 写 IconLocation 时中文路径会变成空白图标。
+    """
+    src = find_app_icon(install_root)
+    if src is None:
+        return None
+    try:
+        from win_path_utils import _ascii_cache_root
+
+        cache_dir = _ascii_cache_root()
+    except ImportError:
+        cache_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "ArgosTranslate"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    cache = cache_dir / "app_icon.ico"
+    try:
+        import shutil
+
+        if (
+            not cache.is_file()
+            or src.stat().st_mtime_ns > cache.stat().st_mtime_ns
+            or src.stat().st_size != cache.stat().st_size
+        ):
+            shutil.copy2(src, cache)
+        return cache if cache.is_file() else src
+    except OSError:
+        return src
+
+
+def _shell_path(path: Path) -> str:
+    try:
+        from win_path_utils import path_for_shortcut
+
+        return path_for_shortcut(path)
+    except ImportError:
+        return str(path.resolve())
+
+
 def _load_win32_icon(path: Path, size: int):
     import ctypes
 
@@ -271,12 +310,12 @@ def _write_shortcut_com(
 
             iface_p = ctypes.c_void_p(psl.value)
             # IShellLinkW: IUnknown(0-2) + GetPath(3) SetPath(4) ...
-            _method_w(4)(iface_p, str(target.resolve()))
+            _method_w(4)(iface_p, _shell_path(target))
             _method_w(12)(iface_p, arguments or "")
-            _method_w(10)(iface_p, str(work_dir.resolve()))
+            _method_w(10)(iface_p, _shell_path(work_dir))
             _method_w(8)(iface_p, description)
             if icon and icon.is_file():
-                _method_icon(21)(iface_p, str(icon.resolve()), 0)
+                _method_icon(21)(iface_p, _shell_path(icon), 0)
 
             QueryInterface = ctypes.WINFUNCTYPE(
                 ctypes.HRESULT,
@@ -365,13 +404,13 @@ def _write_shortcut_vbs(
         args_line = f'sc.Arguments = "{escaped}"\r\n'
     icon_line = ""
     if icon and icon.is_file():
-        icon_line = f'sc.IconLocation = "{icon.resolve()},0"\r\n'
+        icon_line = f'sc.IconLocation = "{_shell_path(icon)},0"\r\n'
     vbs = (
         'Set sh = CreateObject("WScript.Shell")\r\n'
         f'Set sc = sh.CreateShortcut("{tmp_lnk}")\r\n'
-        f'sc.TargetPath = "{target.resolve()}"\r\n'
+        f'sc.TargetPath = "{_shell_path(target)}"\r\n'
         f"{args_line}"
-        f'sc.WorkingDirectory = "{work_dir.resolve()}"\r\n'
+        f'sc.WorkingDirectory = "{_shell_path(work_dir)}"\r\n'
         f"{icon_line}"
         f'sc.Description = "{description.replace(chr(34), "")}"\r\n'
         "sc.Save\r\n"
@@ -476,9 +515,10 @@ def register_windows_search(install_root: Path) -> bool:
 
         icon = find_app_icon(install_root)
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\ArgosTranslatePortable"
+        display_icon = ensure_shortcut_icon(install_root) or icon or install_root
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
             winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "本地翻译器")
-            winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(icon or install_root))
+            winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(display_icon))
             winreg.SetValueEx(
                 key, "InstallLocation", 0, winreg.REG_SZ, str(install_root.resolve())
             )
@@ -499,7 +539,7 @@ def _launcher_shortcut_spec(
     install_root: Path,
 ) -> tuple[Path, str, Path, Path | None] | None:
     install_root = install_root.resolve()
-    icon = find_app_icon(install_root)
+    icon = ensure_shortcut_icon(install_root)
     if icon is None:
         return None
     launcher_exe = install_root / "本地翻译器.exe"
@@ -508,10 +548,10 @@ def _launcher_shortcut_spec(
     cmd = _cmd_exe_path()
     run_bat = install_root / "run_gui.bat"
     if run_bat.is_file() and cmd.is_file():
-        return cmd, f'/c "{run_bat}"', install_root, icon
+        return cmd, f'/c "{_shell_path(run_bat)}"', install_root, icon
     launch_bat = ensure_launcher_bat(install_root)
     if launch_bat is not None and launch_bat.is_file() and cmd.is_file():
-        return cmd, f'/c "{launch_bat}"', install_root, icon
+        return cmd, f'/c "{_shell_path(launch_bat)}"', install_root, icon
     pyw = install_root / "venv" / "Scripts" / "pythonw.exe"
     script = install_root / "portable_launcher.py"
     if pyw.is_file() and script.is_file():

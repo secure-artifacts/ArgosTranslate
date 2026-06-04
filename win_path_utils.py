@@ -46,6 +46,24 @@ def path_has_non_ascii(path: Path | str) -> bool:
         return True
 
 
+def path_for_shortcut(path: Path) -> str:
+    """cscript 写 .lnk 时含中文的路径易乱码，优先 8.3 短路径。"""
+    text = str(path.resolve())
+    if not path_has_non_ascii(text):
+        return text
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+        n = ctypes.windll.kernel32.GetShortPathNameW(text, buf, wintypes.MAX_PATH)
+        if n and buf.value and not path_has_non_ascii(buf.value):
+            return buf.value
+    except Exception:
+        pass
+    return text
+
+
 def app_data_argos_dir() -> Path:
     local = (os.environ.get("LOCALAPPDATA") or "").strip()
     base = Path(local) if local else Path(tempfile.gettempdir())
