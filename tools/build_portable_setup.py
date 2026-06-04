@@ -12,6 +12,8 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 _GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 _EMBED_PYTHON_VERSION = "3.12.10"
 _EMBED_PYTHON_URL = (
