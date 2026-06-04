@@ -11,16 +11,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-STUB = ROOT / "launcher_stub.py"
-
-
-def _write_stub() -> None:
-    """使用仓库根目录 launcher_stub.py（含安装路径记忆与友好报错）。"""
-    src = ROOT / "launcher_stub.py"
-    if not src.is_file():
-        print("[ERROR] launcher_stub.py missing")
-        raise SystemExit(1)
-    STUB.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+ENTRY = ROOT / "launcher_stub.py"
 
 
 def main() -> int:
@@ -31,7 +22,10 @@ def main() -> int:
         print("[ERROR] Python not found")
         return 1
 
-    _write_stub()
+    if not ENTRY.is_file():
+        print(f"[ERROR] {ENTRY.name} missing")
+        return 1
+
     subprocess.check_call([str(py), "-m", "pip", "install", "pyinstaller"], cwd=str(ROOT))
 
     icon = ROOT / "assets" / "app_icon.ico"
@@ -65,7 +59,7 @@ def main() -> int:
         "--specpath",
         str(ROOT / "build"),
         *icon_args,
-        str(STUB),
+        str(ENTRY),
     ]
     print("[INFO]", " ".join(cmd))
     subprocess.check_call(cmd, cwd=str(ROOT))

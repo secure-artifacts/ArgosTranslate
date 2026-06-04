@@ -75,8 +75,7 @@ tools/bkrs*.html
 tools/bkrs*.txt
 tools/bkrs*.json
 
-# PyInstaller
-launcher_stub.py
+# PyInstaller (launcher_stub.py is tracked; build output is not)
 
 # Installer bundles (downloaded at CI build; embedded in setup exe)
 installer_assets/python-embed-amd64.zip
