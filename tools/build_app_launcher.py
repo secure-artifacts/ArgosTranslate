@@ -26,7 +26,9 @@ def _write_stub() -> None:
 def main() -> int:
     py = ROOT / "venv" / "Scripts" / "python.exe"
     if not py.is_file():
-        print("[ERROR] venv not found")
+        py = Path(sys.executable)
+    if not py.is_file():
+        print("[ERROR] Python not found")
         return 1
 
     _write_stub()
@@ -37,6 +39,12 @@ def main() -> int:
 
     out_dir = ROOT / "dist" / "launcher_build"
     out_dir.mkdir(parents=True, exist_ok=True)
+    hidden = (
+        "portable_paths",
+        "portable_installer",
+        "setup_main",
+        "win_path_utils",
+    )
     cmd = [
         str(py),
         "-m",
@@ -49,8 +57,7 @@ def main() -> int:
         "本地翻译器",
         "--paths",
         str(ROOT),
-        "--hidden-import",
-        "portable_paths",
+        *sum([["--hidden-import", h] for h in hidden], []),
         "--distpath",
         str(out_dir),
         "--workpath",
@@ -75,8 +82,14 @@ def main() -> int:
         shutil.copy2(built, alt)
         exe = alt
         print(f"[WARN] Old exe locked; wrote {alt} — close running app and replace manually.")
+    payload_exe = ROOT / "本地翻译器.exe"
+    try:
+        shutil.copy2(built, payload_exe)
+        print(f"[OK] payload -> {payload_exe}")
+    except OSError as e:
+        print(f"[WARN] Could not copy to {payload_exe}: {e}")
     print(f"[OK] {exe}")
-    print("Double-click this exe; it starts venv pythonw (taskbar icon may show python briefly).")
+    print("Place 本地翻译器.exe in install root; shortcuts use it for icon + launch.")
     return 0
 
 

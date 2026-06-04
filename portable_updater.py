@@ -31,6 +31,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "updater_main.py",
     "run_gui.bat",
     "本地翻译器.bat",
+    "本地翻译器.exe",
     "requirements-offline-speech.txt",
     "bulk_text.py",
     "glossary_editor.py",
@@ -301,6 +302,12 @@ def apply_update(
         errors.append(f"version.json: {e}")
 
     save_install_pointer(target_root)
+    try:
+        from app_icon_utils import ensure_windows_launch_entries
+
+        ensure_windows_launch_entries(target_root)
+    except ImportError:
+        pass
     try:
         from portable_installer import (
             apply_gui_patch_to_venv,

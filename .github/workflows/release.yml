@@ -33,6 +33,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path venv/Lib/site-packages/argostranslategui | Out-Null
           Copy-Item patches/argostranslategui_gui.py venv/Lib/site-packages/argostranslategui/gui.py
 
+      - name: Build app launcher exe
+        run: python tools/build_app_launcher.py
+
       - name: Build portable update package
         run: python tools/build_update_package.py
 

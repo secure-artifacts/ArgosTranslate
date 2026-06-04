@@ -330,6 +330,7 @@ def _write_shortcut(
         target=target,
         arguments=arguments,
         work_dir=work_dir,
+        icon=icon,
         description=description,
     ):
         return True
@@ -349,6 +350,7 @@ def _write_shortcut_vbs(
     target: Path,
     arguments: str,
     work_dir: Path,
+    icon: Path | None,
     description: str,
 ) -> bool:
     """cscript + UTF-16 VBS（PowerShell 对中文路径易乱码）。"""
@@ -359,14 +361,18 @@ def _write_shortcut_vbs(
     tmp_lnk = _shortcut_temp_path()
     args_line = ""
     if arguments:
-        arg = arguments.replace('"', "")
-        args_line = f'sc.Arguments = Chr(34) & "{arg}" & Chr(34)\r\n'
+        escaped = arguments.replace('"', '""')
+        args_line = f'sc.Arguments = "{escaped}"\r\n'
+    icon_line = ""
+    if icon and icon.is_file():
+        icon_line = f'sc.IconLocation = "{icon.resolve()},0"\r\n'
     vbs = (
         'Set sh = CreateObject("WScript.Shell")\r\n'
         f'Set sc = sh.CreateShortcut("{tmp_lnk}")\r\n'
         f'sc.TargetPath = "{target.resolve()}"\r\n'
         f"{args_line}"
         f'sc.WorkingDirectory = "{work_dir.resolve()}"\r\n'
+        f"{icon_line}"
         f'sc.Description = "{description.replace(chr(34), "")}"\r\n'
         "sc.Save\r\n"
     )
@@ -499,14 +505,17 @@ def _launcher_shortcut_spec(
     launcher_exe = install_root / "本地翻译器.exe"
     if launcher_exe.is_file():
         return launcher_exe, "", install_root, icon
+    cmd = _cmd_exe_path()
+    run_bat = install_root / "run_gui.bat"
+    if run_bat.is_file() and cmd.is_file():
+        return cmd, f'/c "{run_bat}"', install_root, icon
+    launch_bat = ensure_launcher_bat(install_root)
+    if launch_bat is not None and launch_bat.is_file() and cmd.is_file():
+        return cmd, f'/c "{launch_bat}"', install_root, icon
     pyw = install_root / "venv" / "Scripts" / "pythonw.exe"
     script = install_root / "portable_launcher.py"
     if pyw.is_file() and script.is_file():
         return pyw, str(script), install_root, icon
-    run_bat = install_root / "run_gui.bat"
-    cmd = _cmd_exe_path()
-    if run_bat.is_file() and cmd.is_file():
-        return cmd, f'/c ""{run_bat}""', install_root, icon
     return None
 
 
