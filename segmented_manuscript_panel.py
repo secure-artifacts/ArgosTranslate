@@ -1,7 +1,7 @@
 """分句稿件模式：每行原文与译文同一行对齐。"""
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QTextOption
@@ -21,6 +21,11 @@ from translation_source_edit import (
     TargetTranslationTextEdit,
     sanitize_paste_text,
 )
+
+try:
+    from glossary_target_edit import GlossaryTargetTranslationTextEdit
+except ImportError:
+    GlossaryTargetTranslationTextEdit = TargetTranslationTextEdit  # type: ignore[misc,assignment]
 
 
 def _min_edit_height(edit) -> int:
@@ -85,6 +90,7 @@ class _SegmentRow(QWidget):
         on_multiline_paste: Callable[[int, list], None],
         on_delete_row: Callable[[int], None],
         on_target_changed: Callable[[], None] | None,
+        target_edit_factory: Callable[[], TargetTranslationTextEdit] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -113,7 +119,8 @@ class _SegmentRow(QWidget):
             lambda parts, idx=index: on_multiline_paste(idx, parts)
         )
 
-        self.tgt_edit = TargetTranslationTextEdit()
+        _make_tgt = target_edit_factory or GlossaryTargetTranslationTextEdit
+        self.tgt_edit = _make_tgt()
         self.tgt_edit.setPlaceholderText("译文…")
         self.tgt_edit.setLineWrapMode(TargetTranslationTextEdit.WidgetWidth)
         self.tgt_edit.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
@@ -139,8 +146,6 @@ class _SegmentRow(QWidget):
 
         if on_source_changed is not None:
             self.src_edit.textChanged.connect(on_source_changed)
-        if on_target_changed is not None:
-            self.tgt_edit.textChanged.connect(on_target_changed)
         if on_target_changed is not None:
             self.tgt_edit.textChanged.connect(on_target_changed)
         for edit in (self.src_edit, self.tgt_edit):
@@ -186,6 +191,17 @@ class _SegmentRow(QWidget):
         self.tgt_edit.blockSignals(False)
         self._schedule_sync_row_heights()
 
+    def set_target_glossary(
+        self, text: str, spans: list[dict[str, Any]] | None
+    ) -> None:
+        self.tgt_edit.blockSignals(True)
+        if hasattr(self.tgt_edit, "set_glossary_translation"):
+            self.tgt_edit.set_glossary_translation(text or "", spans)
+        else:
+            self.tgt_edit.setPlainText(text or "")
+        self.tgt_edit.blockSignals(False)
+        self._schedule_sync_row_heights()
+
     def char_count(self) -> int:
         return len(self.src_edit.toPlainText()) + len(self.tgt_edit.toPlainText())
 
@@ -201,6 +217,9 @@ class SegmentedManuscriptPanel(QWidget):
         self._on_adopt: Callable[[int], None] | None = None
         self._on_source_changed: Callable[[], None] | None = None
         self._on_target_changed: Callable[[], None] | None = None
+        self._target_edit_factory: Callable[[], TargetTranslationTextEdit] | None = (
+            None
+        )
         self._block_sync = False
         self._rows: list[_SegmentRow] = []
         self._pending_sources: list[str] = []
@@ -253,6 +272,21 @@ class SegmentedManuscriptPanel(QWidget):
     def set_target_changed_handler(self, handler: Callable[[], None]) -> None:
         self._on_target_changed = handler
 
+    def set_target_edit_factory(
+        self, factory: Callable[[], TargetTranslationTextEdit] | None
+    ) -> None:
+        """替换译文框类型（如查词 + 术语切换）；会保留当前各行内容。"""
+        if factory is self._target_edit_factory:
+            return
+        self._target_edit_factory = factory
+        if not self._rows:
+            return
+        sources = self.get_source_lines()
+        targets = self.get_target_lines()
+        self._pending_sources = sources
+        self._pending_targets = targets
+        self._rebuild_rows(len(sources) or 1)
+
     def row_count(self) -> int:
         return len(self._rows)
 
@@ -296,6 +330,7 @@ class SegmentedManuscriptPanel(QWidget):
                 on_multiline_paste=self._apply_multiline_paste,
                 on_delete_row=self._delete_row,
                 on_target_changed=self._on_target_changed,
+                target_edit_factory=self._target_edit_factory,
                 parent=self._container,
             )
             if i < len(self._pending_sources):
@@ -413,9 +448,17 @@ class SegmentedManuscriptPanel(QWidget):
     def total_target_char_count(self) -> int:
         return sum(len(row.tgt_edit.toPlainText()) for row in self._rows)
 
-    def set_target_line(self, index: int, text: str) -> None:
+    def set_target_line(
+        self,
+        index: int,
+        text: str,
+        spans: list[dict[str, Any]] | None = None,
+    ) -> None:
         if 0 <= index < len(self._rows):
-            self._rows[index].set_target_text(text)
+            if spans is not None:
+                self._rows[index].set_target_glossary(text, spans)
+            else:
+                self._rows[index].set_target_text(text)
 
     def set_all_rows(
         self,

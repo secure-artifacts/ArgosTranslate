@@ -122,7 +122,7 @@ def _trim_session_text(s: str) -> str:
 class SegmentedTranslationThread(QThread):
     """分句模式：在后台逐行翻译。"""
 
-    line_translated = pyqtSignal(int, str)
+    line_translated = pyqtSignal(int, str, object)
 
     def __init__(self, translate_one, lines: list[str], parent=None) -> None:
         super().__init__(parent)
@@ -133,14 +133,20 @@ class SegmentedTranslationThread(QThread):
         for i, line in enumerate(self._lines):
             raw = line or ""
             if not raw.strip():
-                self.line_translated.emit(i, "")
+                self.line_translated.emit(i, "", [])
                 continue
             try:
-                self.line_translated.emit(i, self._translate_one(raw))
+                result = self._translate_one(raw)
+                if isinstance(result, tuple) and len(result) == 2:
+                    text, spans = result
+                else:
+                    text, spans = str(result or ""), []
+                self.line_translated.emit(i, text, spans if isinstance(spans, list) else [])
             except Exception as e:
                 self.line_translated.emit(
                     i,
                     f"[翻译出错] {type(e).__name__}: {e}",
+                    [],
                 )
 
 
@@ -736,6 +742,7 @@ class TranslationTabPage(QWidget):
             if tm_hit is not None:
                 tm.append_hit_log(tm_hit, query=input_text_raw)
                 self._target_postprocess_done = True
+                self._pending_glossary_spans = []
                 return tm_hit.target_text
         except ImportError:
             pass
@@ -1182,6 +1189,20 @@ class TranslationTabPage(QWidget):
             in ("ClickableTranslationTextEdit", "GlossaryClickableTargetTextEdit")
         )
 
+    def _make_segmented_target_edit(self):
+        """与主译文区同类型，便于分句行内术语高亮/查词。"""
+        cls = type(self.right_textEdit)
+        name = cls.__name__
+        if name in ("ClickableTranslationTextEdit", "GlossaryClickableTargetTextEdit"):
+            return cls(self, role="target")
+        return cls()
+
+    def _sync_segmented_target_edit_factory(self) -> None:
+        if hasattr(self, "_segmented_panel") and self._segmented_panel is not None:
+            self._segmented_panel.set_target_edit_factory(
+                self._make_segmented_target_edit
+            )
+
     def _replace_text_edit_with_clickable(
         self, attr: str, *, role: str, wi_mod
     ) -> None:
@@ -1234,6 +1255,7 @@ class TranslationTabPage(QWidget):
         self._replace_text_edit_with_clickable(
             "right_textEdit", role="target", wi_mod=wi_mod
         )
+        self._sync_segmented_target_edit_factory()
         if self._word_lookup_panel is None and hasattr(wi_mod, "WordLookupPanel"):
             self._attach_word_lookup_panel(wi_mod.WordLookupPanel(self))
 
@@ -1713,7 +1735,7 @@ class TranslationTabPage(QWidget):
         self._set_feedback_message(f"正在逐句翻译（0/{total}）…")
         tab = self
 
-        def translate_one(raw_line: str) -> str:
+        def translate_one(raw_line: str) -> tuple[str, list]:
             tab._target_postprocess_done = False
             out = tab._translate_in_worker(
                 raw_line,
@@ -1724,16 +1746,29 @@ class TranslationTabPage(QWidget):
                 bm=bm,
                 use_glossary=use_glossary,
             )
-            return tab._postprocess_target_text(out, raw_line)
+            spans = list(getattr(tab, "_pending_glossary_spans", []) or [])
+            tab._pending_glossary_spans = []
+            t = tab._postprocess_target_text(out, raw_line)
+            if use_glossary and spans:
+                try:
+                    import terminology_bridge as tb_mod
+
+                    spans = tb_mod.relocate_glossary_spans(t, spans)
+                except ImportError:
+                    pass
+            return t, spans
 
         worker = SegmentedTranslationThread(translate_one, lines, self)
         done = 0
 
-        def _on_line(index: int, text: str, _seq: int = seq) -> None:
+        def _on_line(
+            index: int, text: str, spans: object, _seq: int = seq
+        ) -> None:
             nonlocal done
             if _seq != self._segmented_translate_seq:
                 return
-            self._segmented_panel.set_target_line(index, text)
+            gloss_spans = spans if isinstance(spans, list) else []
+            self._segmented_panel.set_target_line(index, text, gloss_spans)
             if (lines[index] or "").strip():
                 done += 1
                 self._set_feedback_message(f"正在逐句翻译（{done}/{total}）…")
