@@ -86,18 +86,36 @@ def _api_request(url: str) -> Any:
 
 
 def _pick_zip_asset(assets: list[dict[str, Any]]) -> dict[str, Any] | None:
-    best: dict[str, Any] | None = None
+    """选择程序更新 zip，排除 install_wheels / 安装包等非更新包。"""
+    candidates: list[dict[str, Any]] = []
     for a in assets or []:
         name = (a.get("name") or "").strip()
-        if not name.endswith(".zip"):
+        if not name.lower().endswith(".zip"):
             continue
         low = name.lower()
-        if "launcher" in low or "setup" in low:
+        if any(
+            token in low
+            for token in (
+                "launcher",
+                "setup",
+                "install_wheels",
+                "payload",
+                "embed",
+            )
+        ):
             continue
         if name.startswith("ArgosTranslate-v") or name.startswith("ArgosTranslate-"):
-            best = a
-            break
-    return best
+            candidates.append(a)
+
+    for a in candidates:
+        name = (a.get("name") or "").strip()
+        if re.fullmatch(r"ArgosTranslate-v\d+\.\d+\.\d+\.zip", name, re.I):
+            return a
+    for a in candidates:
+        name = (a.get("name") or "").strip()
+        if "install_wheels" not in name.lower():
+            return a
+    return None
 
 
 def fetch_latest_release(

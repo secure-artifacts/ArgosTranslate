@@ -959,6 +959,7 @@ def _install_wheels_download_urls(version: str) -> list[str]:
     tag = f"v{version.strip().lstrip('v')}"
     base = f"https://github.com/secure-artifacts/ArgosTranslate/releases/download/{tag}"
     return [
+        f"{base}/install_wheels-{tag}.zip",
         f"{base}/ArgosTranslate-{tag}-install_wheels.zip",
         f"{base}/install_wheels.zip",
     ]

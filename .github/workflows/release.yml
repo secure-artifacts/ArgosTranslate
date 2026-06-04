@@ -55,7 +55,7 @@ jobs:
           }
           $wheels = Get-ChildItem dist/*-install_wheels.zip -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($wheels) {
-            Copy-Item $wheels.FullName "dist_final/ArgosTranslate-${{ github.ref_name }}-install_wheels.zip"
+            Copy-Item $wheels.FullName "dist_final/install_wheels-${{ github.ref_name }}.zip"
           }
 
       - name: Attest Build Provenance

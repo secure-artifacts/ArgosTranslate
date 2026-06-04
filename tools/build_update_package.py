@@ -49,7 +49,7 @@ def build_payload(out_dir: Path | None = None) -> Path:
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for rel in files:
             full = dest / rel
-            zf.write(full, arcname=f"{name}/{rel.as_posix()}")
+            zf.write(full, arcname=rel.as_posix())
     print(f"[OK] zip -> {zip_path}")
     return dest
 
