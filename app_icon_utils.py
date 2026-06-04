@@ -6,12 +6,23 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from app_version import APP_NAME as _APP_DISPLAY_NAME
+except ImportError:
+    _APP_DISPLAY_NAME = "本地翻译器（俄乌）"
+
 APP_USER_MODEL_ID = "ArgosTranslate.Portable.LocalTranslator.1"
+_APP_SHORTCUT_NAME = f"{_APP_DISPLAY_NAME}.lnk"
 _START_MENU_NAMES: tuple[str, ...] = (
+    _APP_SHORTCUT_NAME,
     "本地翻译器.lnk",
-    "本地翻译器（俄乌）.lnk",
 )
-_DESKTOP_NAME = "本地翻译器.lnk"
+_DESKTOP_NAME = _APP_SHORTCUT_NAME
+_STALE_SHORTCUT_NAMES: tuple[str, ...] = (
+    "test_shortcut.lnk",
+    "test_local.lnk",
+    "本地翻译器.lnk",
+)
 
 
 def set_windows_app_user_model_id() -> None:
@@ -54,7 +65,7 @@ def ensure_shortcut_icon(install_root: Path) -> Path | None:
     except ImportError:
         cache_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "ArgosTranslate"
         cache_dir.mkdir(parents=True, exist_ok=True)
-    cache = cache_dir / "app_icon.ico"
+    cache = cache_dir / "local_translator.ico"
     try:
         import shutil
 
@@ -188,7 +199,12 @@ def _start_menu_programs_dir() -> Path | None:
     if not appdata:
         return None
     folder = (
-        Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "本地翻译器"
+        Path(appdata)
+        / "Microsoft"
+        / "Windows"
+        / "Start Menu"
+        / "Programs"
+        / _APP_DISPLAY_NAME
     )
     folder.mkdir(parents=True, exist_ok=True)
     return folder
@@ -517,7 +533,7 @@ def register_windows_search(install_root: Path) -> bool:
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\ArgosTranslatePortable"
         display_icon = ensure_shortcut_icon(install_root) or icon or install_root
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "本地翻译器")
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, _APP_DISPLAY_NAME)
             winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(display_icon))
             winreg.SetValueEx(
                 key, "InstallLocation", 0, winreg.REG_SZ, str(install_root.resolve())
@@ -542,8 +558,14 @@ def _launcher_shortcut_spec(
     icon = ensure_shortcut_icon(install_root)
     if icon is None:
         return None
+    try:
+        from win_path_utils import path_has_non_ascii
+
+        ascii_install = not path_has_non_ascii(install_root)
+    except ImportError:
+        ascii_install = True
     launcher_exe = install_root / "本地翻译器.exe"
-    if launcher_exe.is_file():
+    if launcher_exe.is_file() and ascii_install:
         return launcher_exe, "", install_root, icon
     cmd = _cmd_exe_path()
     run_bat = install_root / "run_gui.bat"
@@ -572,13 +594,13 @@ def ensure_start_menu_shortcut(install_root: Path) -> bool:
     if spec is None:
         return False
     target, arguments, work_dir, icon = spec
-    desc = "本地翻译器 俄语 乌克兰语 离线翻译 ArgosTranslate"
+    desc = f"{_APP_DISPLAY_NAME} 俄语 乌克兰语 离线翻译"
     ok = False
     for programs in (programs_root, programs_sub):
         if programs is None:
             continue
         programs.mkdir(parents=True, exist_ok=True)
-        names = _START_MENU_NAMES if programs == programs_sub else ("本地翻译器.lnk",)
+        names = _START_MENU_NAMES if programs == programs_sub else (_APP_SHORTCUT_NAME,)
         for name in names:
             if _write_shortcut(
                 programs / name,
@@ -617,8 +639,43 @@ def ensure_desktop_shortcut(install_root: Path) -> bool:
         arguments=arguments,
         work_dir=work_dir,
         icon=icon,
-        description="本地翻译器（俄乌）",
+        description=_APP_DISPLAY_NAME,
     )
+
+
+def _remove_stale_shortcuts() -> None:
+    """删除调试或旧版快捷方式，避免桌面出现 test_shortcut 等。"""
+    if sys.platform != "win32":
+        return
+    targets: list[Path] = []
+    appdata = os.environ.get("APPDATA", "").strip()
+    if appdata:
+        programs = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+        targets.extend(programs / name for name in _STALE_SHORTCUT_NAMES)
+        targets.extend(
+            programs / "本地翻译器" / name for name in _STALE_SHORTCUT_NAMES
+        )
+        targets.extend(
+            programs / _APP_DISPLAY_NAME / name
+            for name in ("test_shortcut.lnk", "test_local.lnk")
+        )
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0, None, 0, buf) == 0:
+            desktop = Path(buf.value)
+            for name in _STALE_SHORTCUT_NAMES:
+                targets.append(desktop / name)
+    except Exception:
+        pass
+    for path in targets:
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError:
+            pass
 
 
 def create_start_menu_shortcut(install_root: Path) -> None:
@@ -629,6 +686,7 @@ def create_start_menu_shortcut(install_root: Path) -> None:
 def ensure_windows_launch_entries(install_root: Path) -> bool:
     """开始菜单 + 桌面快捷方式 + 系统搜索注册 + 本地翻译器.bat。"""
     install_root = install_root.resolve()
+    _remove_stale_shortcuts()
     ensure_launcher_bat(install_root)
     register_windows_search(install_root)
     ok_menu = ensure_start_menu_shortcut(install_root)

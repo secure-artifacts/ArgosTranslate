@@ -25,7 +25,7 @@ if errorlevel 1 (
 )
 echo.
 echo [OK] 已写入开始菜单与桌面快捷方式，并注册系统搜索项。
-echo 请稍等 1～2 分钟后在开始菜单搜索：本地翻译器
+echo 请稍等 1～2 分钟后在开始菜单搜索：本地翻译器（俄乌）
 echo 也可直接双击：%ROOT%\本地翻译器.bat
 pause
 endlocal
