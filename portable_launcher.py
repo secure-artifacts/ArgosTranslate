@@ -108,6 +108,12 @@ def _bootstrap_for_gui(root: Path) -> None:
         from portable_installer import apply_gui_patch_to_venv
 
         apply_gui_patch_to_venv(root)
+        try:
+            from app_icon_utils import ensure_start_menu_shortcut
+
+            ensure_start_menu_shortcut(root)
+        except ImportError:
+            pass
     except ImportError:
         pass
     try:

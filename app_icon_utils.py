@@ -7,7 +7,11 @@ import sys
 from pathlib import Path
 
 APP_USER_MODEL_ID = "ArgosTranslate.Portable.LocalTranslator.1"
-_SHORTCUT_NAME = "本地翻译器（俄乌）.lnk"
+_START_MENU_NAMES: tuple[str, ...] = (
+    "本地翻译器.lnk",
+    "本地翻译器（俄乌）.lnk",
+)
+_DESKTOP_NAME = "本地翻译器.lnk"
 
 
 def set_windows_app_user_model_id() -> None:
@@ -140,38 +144,45 @@ def make_qicon(root: Path | None):
     return QIcon()
 
 
-def create_start_menu_shortcut(install_root: Path) -> None:
-    """安装后写入开始菜单快捷方式（图标指向 assets/app_icon.ico）。"""
-    if sys.platform != "win32":
-        return
-    icon = find_app_icon(install_root)
-    if icon is None:
-        return
-    pyw = install_root / "venv" / "Scripts" / "pythonw.exe"
-    script = install_root / "portable_launcher.py"
-    if not pyw.is_file() or not script.is_file():
-        return
+def _start_menu_programs_dir() -> Path | None:
     appdata = os.environ.get("APPDATA", "").strip()
     if not appdata:
-        return
+        return None
     programs = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
     programs.mkdir(parents=True, exist_ok=True)
-    lnk = programs / _SHORTCUT_NAME
+    return programs
+
+
+def _write_shortcut(
+    lnk_path: Path,
+    *,
+    target: Path,
+    arguments: str,
+    work_dir: Path,
+    icon: Path | None,
+    description: str,
+) -> bool:
+    if sys.platform != "win32":
+        return False
     ps = (
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:ARGOS_LNK);"
-        f"$s.TargetPath = '{pyw}';"
-        f"$s.Arguments = '\"{script}\"';"
-        f"$s.WorkingDirectory = '{install_root}';"
-        f"$s.IconLocation = '{icon},0';"
-        "$s.Description = '本地翻译器（俄乌）';"
+        "$s.TargetPath = $env:ARGOS_TARGET;"
+        "$s.Arguments = $env:ARGOS_ARGS;"
+        "$s.WorkingDirectory = $env:ARGOS_WORKDIR;"
+        "if ($env:ARGOS_ICON) { $s.IconLocation = $env:ARGOS_ICON + ',0' };"
+        f"$s.Description = '{description}';"
         "$s.Save()"
     )
     env = os.environ.copy()
-    env["ARGOS_LNK"] = str(lnk)
+    env["ARGOS_LNK"] = str(lnk_path)
+    env["ARGOS_TARGET"] = str(target)
+    env["ARGOS_ARGS"] = arguments
+    env["ARGOS_WORKDIR"] = str(work_dir)
+    env["ARGOS_ICON"] = str(icon.resolve()) if icon and icon.is_file() else ""
     try:
         from win_path_utils import subprocess_hide_window_kwargs
 
-        subprocess.run(
+        r = subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
             env=env,
             check=False,
@@ -179,5 +190,77 @@ def create_start_menu_shortcut(install_root: Path) -> None:
             timeout=30,
             **subprocess_hide_window_kwargs(),
         )
+        return r.returncode == 0 and lnk_path.is_file()
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        return False
+
+
+def _launcher_shortcut_spec(install_root: Path) -> tuple[Path, str, Path, Path | None] | None:
+    install_root = install_root.resolve()
+    icon = find_app_icon(install_root)
+    if icon is None:
+        return None
+    pyw = install_root / "venv" / "Scripts" / "pythonw.exe"
+    script = install_root / "portable_launcher.py"
+    bat = install_root / "run_gui.bat"
+    if pyw.is_file() and script.is_file():
+        return pyw, f'"{script}"', install_root, icon
+    if bat.is_file():
+        return bat, "", install_root, icon
+    return None
+
+
+def ensure_start_menu_shortcut(install_root: Path) -> bool:
+    """写入/刷新开始菜单快捷方式，便于 Windows 搜索「本地翻译器」。"""
+    programs = _start_menu_programs_dir()
+    spec = _launcher_shortcut_spec(install_root)
+    if programs is None or spec is None:
+        return False
+    target, arguments, work_dir, icon = spec
+    desc = "本地翻译器（俄乌）— 俄语乌克兰语离线翻译 ArgosTranslate"
+    ok = False
+    for name in _START_MENU_NAMES:
+        if _write_shortcut(
+            programs / name,
+            target=target,
+            arguments=arguments,
+            work_dir=work_dir,
+            icon=icon,
+            description=desc,
+        ):
+            ok = True
+    return ok
+
+
+def ensure_desktop_shortcut(install_root: Path) -> bool:
+    """可选：桌面快捷方式（与开始菜单相同目标）。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+        # CSIDL_DESKTOP = 0
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0, None, 0, buf) != 0:
+            return False
+        desktop = Path(buf.value)
+    except Exception:
+        return False
+    spec = _launcher_shortcut_spec(install_root)
+    if spec is None:
+        return False
+    target, arguments, work_dir, icon = spec
+    return _write_shortcut(
+        desktop / _DESKTOP_NAME,
+        target=target,
+        arguments=arguments,
+        work_dir=work_dir,
+        icon=icon,
+        description="本地翻译器（俄乌）",
+    )
+
+
+def create_start_menu_shortcut(install_root: Path) -> None:
+    """安装后写入开始菜单快捷方式（兼容旧名）。"""
+    ensure_start_menu_shortcut(install_root)
