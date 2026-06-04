@@ -20,6 +20,9 @@ REQUIRED_RUNTIME_FILES: tuple[str, ...] = (
     "native_dll_bootstrap.py",
     "bkrs_parser.py",
     "word_info_dialog.py",
+    "glossary_alternatives.py",
+    "glossary_cell_sanitize.py",
+    "glossary_target_edit.py",
     "patches/argostranslategui_gui.py",
 )
 

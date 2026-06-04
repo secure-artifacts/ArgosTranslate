@@ -232,7 +232,12 @@ class TranslationTabPage(QWidget):
         layout.addWidget(lang_bar)
 
         self.left_textEdit = SourceTranslationTextEdit()
-        from glossary_target_edit import GlossaryTargetTranslationTextEdit
+        try:
+            from glossary_target_edit import GlossaryTargetTranslationTextEdit
+        except ImportError:
+            from translation_source_edit import (
+                TargetTranslationTextEdit as GlossaryTargetTranslationTextEdit,
+            )
         from argostranslategui.gui import _fast_startup_enabled
 
         if root is not None and _fast_startup_enabled():
@@ -1187,12 +1192,15 @@ class TranslationTabPage(QWidget):
         elif old.__class__.__name__ == "ClickableTranslationTextEdit":
             return
         if attr == "right_textEdit":
-            from glossary_target_edit import make_glossary_clickable_target_class
+            try:
+                from glossary_target_edit import make_glossary_clickable_target_class
 
-            cls = make_glossary_clickable_target_class(
-                wi_mod.ClickableTranslationTextEdit
-            )
-            new = cls(self, role=role)
+                cls = make_glossary_clickable_target_class(
+                    wi_mod.ClickableTranslationTextEdit
+                )
+                new = cls(self, role=role)
+            except ImportError:
+                new = wi_mod.ClickableTranslationTextEdit(self, role=role)
         else:
             new = wi_mod.ClickableTranslationTextEdit(self, role=role)
         new.setPlainText(old.toPlainText())
