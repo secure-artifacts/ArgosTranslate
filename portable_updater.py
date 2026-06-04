@@ -68,6 +68,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "slavic_to_zh_enhance.py",
     "zh_to_slavic_enhance.py",
     "argos_inference_tuning.py",
+    "argos_settings_compat.py",
     "argos_cpu_tuning.py",
     "argos_enhance.py",
     "argos_quality_guard.py",

@@ -33,6 +33,12 @@ def apply_cpu_defaults() -> None:
         return
     _APPLIED = True
     try:
+        import argos_settings_compat as asc
+
+        asc.ensure_extended_settings()
+    except ImportError:
+        pass
+    try:
         import argostranslate.settings as s
     except ImportError:
         return

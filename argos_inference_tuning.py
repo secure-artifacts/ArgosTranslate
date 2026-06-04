@@ -85,6 +85,12 @@ def _scaled_max_decoding_tokens(text: str, saved: dict[str, object]) -> int:
 
 def _ensure_saved() -> dict[str, object]:
     global _SAVED
+    try:
+        import argos_settings_compat as asc
+
+        asc.ensure_extended_settings()
+    except ImportError:
+        pass
     import argostranslate.settings as s
 
     if _SAVED is None:
