@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QDialog,
@@ -27,6 +27,7 @@ from github_update import (
     installed_version,
 )
 from portable_paths import find_portable_root, is_install_root
+from portable_updater import restart_application
 
 
 class _UpdateWorker(QThread):
@@ -65,6 +66,7 @@ class UpdateDialog(QDialog):
         self.setMinimumSize(480, 360)
         self._release: ReleaseInfo | None = None
         self._worker: _UpdateWorker | None = None
+        self._restarting = False
 
         layout = QVBoxLayout(self)
         root = find_portable_root()
@@ -133,7 +135,7 @@ class UpdateDialog(QDialog):
                 "安装更新",
                 f"将从 GitHub 下载并安装 {self._release.version}。\n"
                 "更新过程中请勿关闭本窗口。\n"
-                "完成后请完全退出并重新打开软件。\n\n"
+                "安装完成后将自动重启软件。\n\n"
                 "是否继续？",
             )
             != QMessageBox.Yes
@@ -184,24 +186,25 @@ class UpdateDialog(QDialog):
                     + "\n".join(errors[:8]),
                 )
             else:
-                QMessageBox.information(
-                    self,
-                    "更新完成",
-                    f"已更新 {count} 个文件。\n"
-                    f"版本：{old_v} → {new_v}\n\n"
-                    "请完全退出本程序后重新打开，以加载新版本。",
-                )
+                root = find_portable_root()
+                self._restarting = True
                 self._lbl_info.setText(
                     self._lbl_info.text().replace(
                         f"当前版本：{old_v}", f"当前版本：{new_v}"
                     )
                 )
+                self._lbl_status.setText(
+                    f"更新完成：{old_v} → {new_v}（已更新 {count} 个文件），正在重启…"
+                )
+                self._schedule_restart(root)
 
     def _on_worker_fail(self, msg: str) -> None:
         self._lbl_status.setText(f"失败：{msg}")
         QMessageBox.warning(self, "检查更新", msg)
 
     def _on_worker_finished(self) -> None:
+        if self._restarting:
+            return
         self._set_busy(False)
         if self._release is not None:
             from app_version import compare_versions
@@ -210,6 +213,35 @@ class UpdateDialog(QDialog):
                 compare_versions(self._release.version, installed_version()) > 0
             )
             self._btn_release.setEnabled(True)
+
+    def _schedule_restart(self, install_root: Path) -> None:
+        if not is_install_root(install_root):
+            QMessageBox.warning(
+                self,
+                "更新完成",
+                "无法自动重启：未找到安装目录。\n请手动重新打开软件。",
+            )
+            return
+        if not restart_application(install_root):
+            QMessageBox.warning(
+                self,
+                "更新完成",
+                "无法自动重启。\n请手动运行 run_gui.bat 或重新打开软件。",
+            )
+            return
+        self.accept()
+        QTimer.singleShot(300, _exit_application_after_update)
+
+
+def _exit_application_after_update() -> None:
+    import sys
+
+    from PyQt5.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is not None:
+        app.quit()
+    sys.exit(0)
 
 
 def open_update_dialog(parent=None) -> None:

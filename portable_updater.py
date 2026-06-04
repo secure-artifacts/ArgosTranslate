@@ -326,15 +326,39 @@ def launch_gui(target_root: Path) -> bool:
         from win_path_utils import subprocess_hide_window_kwargs
 
         env = os.environ.copy()
+        env.setdefault("XDG_DATA_HOME", str(target_root / "data" / "local"))
+        env.setdefault("XDG_CONFIG_HOME", str(target_root / "data" / "config"))
+        env.setdefault("XDG_CACHE_HOME", str(target_root / "data" / "cache"))
         env["ARGOS_TRANSLATE_HOME"] = str(target_root.resolve())
+        try:
+            from native_dll_bootstrap import runtime_env_for_root
+
+            env.update(runtime_env_for_root(target_root))
+        except ImportError:
+            pass
         subprocess.Popen(
             [str(pyw), str(script)],
             cwd=str(target_root),
             env=env,
-            **subprocess_hide_window_kwargs(),
+            close_fds=True,
+            **subprocess_hide_window_kwargs(detached=True),
         )
         return True
     return False
+
+
+def restart_application(target_root: Path) -> bool:
+    """更新完成后启动新实例；当前进程应由调用方退出。"""
+    target_root = target_root.resolve()
+    try:
+        from portable_installer import launch_app
+
+        if (target_root / "venv" / "Scripts" / "pythonw.exe").is_file():
+            launch_app(target_root)
+            return True
+    except ImportError:
+        pass
+    return launch_gui(target_root)
 
 
 def update_summary(
