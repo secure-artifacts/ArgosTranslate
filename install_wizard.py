@@ -17,6 +17,7 @@ from portable_installer import (
     default_install_dir,
     install_to,
 )
+from app_version import APP_VERSION
 from portable_paths import is_install_root, load_install_pointer
 from portable_ui_theme import PALETTE_LIGHT
 
@@ -91,11 +92,14 @@ def _apply_ttk_theme(root: tk.Tk) -> ttk.Style:
 class InstallWizard:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("本地翻译器 — 安装")
-        self.root.geometry("560x620")
-        self.root.minsize(520, 560)
+        self.root.title(f"本地翻译器 — 安装 (v{APP_VERSION})")
+        self.root.geometry("560x640")
+        self.root.minsize(520, 580)
         self.root.resizable(True, True)
         self.root.configure(bg=P["bg"])
+        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.bind("<Return>", lambda _e: self._start_install())
         _set_wizard_window_icon(self.root)
         self._style = _apply_ttk_theme(self.root)
         self._target = tk.StringVar()
@@ -172,8 +176,8 @@ class InstallWizard:
 
     def _build(self) -> None:
         header = tk.Frame(self.root, bg=P["chrome_bg"], height=76)
-        header.pack(fill="x")
-        header.pack_propagate(False)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_propagate(False)
         tk.Label(
             header,
             text="本地翻译器（俄乌）",
@@ -189,10 +193,14 @@ class InstallWizard:
             bg=P["chrome_bg"],
         ).pack(anchor="w", padx=18, pady=(2, 0))
 
-        footer = tk.Frame(self.root, bg=P["bg"])
-        footer.pack(side="bottom", fill="x", padx=16, pady=(0, 14))
+        body = tk.Frame(self.root, bg=P["bg"])
+        body.grid(row=1, column=0, sticky="nsew", padx=16, pady=14)
+
+        footer = tk.Frame(self.root, bg=P["bg"], height=52)
+        footer.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 14))
+        footer.grid_propagate(False)
         btn_row = tk.Frame(footer, bg=P["bg"])
-        btn_row.pack(fill="x")
+        btn_row.pack(expand=True)
         self._btn_install = self._button(
             btn_row, "开始安装", self._start_install, primary=True, width=12
         )
@@ -203,9 +211,6 @@ class InstallWizard:
         self._btn_clean.pack(side="right", padx=(0, 8))
         cancel = self._button(btn_row, "取消", self.root.destroy, width=8)
         cancel.pack(side="right", padx=(0, 8))
-
-        body = tk.Frame(self.root, bg=P["bg"])
-        body.pack(side="top", fill="both", expand=True, padx=16, pady=14)
 
         card = tk.Frame(
             body,
