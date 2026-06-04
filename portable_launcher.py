@@ -96,6 +96,14 @@ def _bootstrap_for_gui(root: Path) -> None:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     try:
+        from portable_paths import missing_runtime_files
+        from portable_installer import repair_missing_payload_files
+
+        if missing_runtime_files(root):
+            repair_missing_payload_files(root)
+    except ImportError:
+        pass
+    try:
         from native_dll_bootstrap import (
             prepare_native_dll_paths,
             prepare_qt_plugin_paths,

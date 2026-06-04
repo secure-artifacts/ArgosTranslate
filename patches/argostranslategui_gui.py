@@ -1098,6 +1098,14 @@ def _get_translation_tab_page_class():
     if _translation_tab_page_cls is not None:
         return _translation_tab_page_cls
     root = _portable_bundle_root()
+    if root is not None and str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    try:
+        mod = importlib.import_module("translation_tab_page")
+        _translation_tab_page_cls = mod.TranslationTabPage
+        return _translation_tab_page_cls
+    except Exception:
+        pass
     if root is None:
         return None
     path = root / "translation_tab_page.py"

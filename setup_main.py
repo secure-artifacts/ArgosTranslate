@@ -11,7 +11,13 @@ from win_path_utils import configure_windows_utf8
 configure_windows_utf8()
 
 from portable_paths import find_portable_root, is_install_root, save_install_pointer
-from portable_installer import launch_app, repair_missing_payload_files, verify_installer_bundle
+from portable_installer import (
+    launch_app,
+    persist_payload_cache,
+    repair_missing_payload_files,
+    resolve_payload_zip,
+    verify_installer_bundle,
+)
 
 
 def main() -> int:
@@ -45,6 +51,9 @@ def main() -> int:
             return 1
     elif getattr(sys, "frozen", False):
         repair_missing_payload_files(root)
+        zpath = resolve_payload_zip(root)
+        if zpath is not None:
+            persist_payload_cache(root, zpath)
 
     save_install_pointer(root)
     return launch_app(root)

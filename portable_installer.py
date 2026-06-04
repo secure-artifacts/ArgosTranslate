@@ -108,6 +108,40 @@ def bundled_payload_zip() -> Path | None:
     return zips[0] if zips else None
 
 
+def install_payload_cache_path(install_root: Path) -> Path:
+    return install_root / "data" / "install" / "app_payload.zip"
+
+
+def _persist_payload_cache(install_root: Path, source: Path) -> None:
+    if not source.is_file():
+        return
+    dest = install_payload_cache_path(install_root)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.is_file() and dest.stat().st_size == source.stat().st_size:
+            return
+        shutil.copy2(source, dest)
+    except OSError:
+        pass
+
+
+def persist_payload_cache(install_root: Path, source: Path) -> None:
+    """将 payload zip 缓存到安装目录，供 run_gui / pythonw 启动时补全缺失文件。"""
+    _persist_payload_cache(install_root, source)
+
+
+def resolve_payload_zip(install_root: Path | None = None) -> Path | None:
+    """内嵌 zip → 安装目录缓存 → 开发机 dist/update。"""
+    bundled = bundled_payload_zip()
+    if bundled is not None:
+        return bundled
+    if install_root is not None:
+        cache = install_payload_cache_path(install_root)
+        if cache.is_file() and cache.stat().st_size > 10_000:
+            return cache
+    return bundled_payload_zip()
+
+
 def verify_installer_bundle() -> None:
     """打包后的安装 exe 必须内嵌 app_payload.zip，否则无法完成首次安装。"""
     if not getattr(sys, "frozen", False):
@@ -701,10 +735,31 @@ def _copy_payload_item(src: Path, dest: Path) -> None:
             shutil.copytree(src, dest, dirs_exist_ok=True)
 
 
+def _copy_payload_manifest(
+    payload_root: Path,
+    install_root: Path,
+    cb: ProgressCb | None,
+    *,
+    step: int = 1,
+    base_frac: float = 0.0,
+    span: float = 1.0,
+) -> None:
+    todo = [rel for rel in UPDATE_REL_PATHS if (payload_root / rel).exists()]
+    n = max(1, len(todo))
+    for i, rel in enumerate(todo):
+        _copy_payload_item(payload_root / rel, install_root / rel)
+        _emit(
+            cb,
+            step,
+            base_frac + span * (i + 1) / n,
+            f"正在释放：{rel}",
+        )
+
+
 def repair_missing_payload_files(
     install_root: Path, cb: ProgressCb | None = None
 ) -> list[str]:
-    """从安装 exe 内嵌包或开发目录补全 UPDATE_REL_PATHS 中缺失项。返回仍缺失路径。"""
+    """从安装 exe / 本地缓存 / 开发目录补全缺失项。返回仍缺失路径。"""
     _sync_missing_payload_files(install_root, cb)
     return missing_runtime_files(install_root)
 
@@ -714,7 +769,7 @@ def _sync_missing_payload_files(install_root: Path, cb: ProgressCb | None) -> No
     missing = [rel for rel in UPDATE_REL_PATHS if not (install_root / rel).exists()]
     if not missing:
         return
-    zpath = bundled_payload_zip()
+    zpath = resolve_payload_zip(install_root)
     if zpath is None:
         src_root = dev_source_root()
         if (src_root / "terminology_bridge.py").is_file():
@@ -762,7 +817,7 @@ def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
         _emit(cb, 1, 1.0, "程序文件复制完成。")
         return
 
-    zpath = bundled_payload_zip()
+    zpath = resolve_payload_zip(install_root)
     if zpath is None:
         raise RuntimeError(
             "未找到内嵌程序包。\n"
@@ -772,19 +827,9 @@ def _deploy_payload(install_root: Path, cb: ProgressCb | None) -> None:
     _emit(cb, 1, 0.05, "正在从内嵌程序包释放文件…")
     tmp = install_root / "_payload_extract"
     payload_root = _payload_root_from_zip(zpath, tmp)
-    items = list(payload_root.iterdir())
-    n = max(1, len(items))
-    for i, item in enumerate(items):
-        dest = install_root / item.name
-        if dest.exists() and dest.is_dir():
-            shutil.rmtree(dest, ignore_errors=True)
-        if item.is_dir():
-            shutil.copytree(item, dest, dirs_exist_ok=True)
-        else:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(item, dest)
-        _emit(cb, 1, 0.2 + 0.8 * (i + 1) / n, f"正在释放：{item.name}")
+    _copy_payload_manifest(payload_root, install_root, cb, step=1, base_frac=0.2, span=0.75)
     shutil.rmtree(tmp, ignore_errors=True)
+    _persist_payload_cache(install_root, zpath)
     _sync_missing_payload_files(install_root, cb)
     _emit(cb, 1, 1.0, "程序文件释放完成。")
 
