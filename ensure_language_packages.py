@@ -36,6 +36,15 @@ def _noop_progress(_frac: float, _msg: str) -> None:
     pass
 
 
+def _hidden_subprocess_kwargs() -> dict:
+    try:
+        from win_path_utils import subprocess_hide_window_kwargs
+
+        return subprocess_hide_window_kwargs()
+    except ImportError:
+        return {}
+
+
 def packages_root(install_root: Path) -> Path:
     return install_root / "data" / "local" / "argos-translate" / "packages"
 
@@ -144,6 +153,7 @@ print("OK")
         text=True,
         encoding="utf-8",
         errors="replace",
+        **_hidden_subprocess_kwargs(),
     )
     if r.returncode != 0:
         tail = (r.stderr or r.stdout or "")[-2000:]
@@ -173,6 +183,7 @@ def _run_build_script(py: Path, install_root: Path, script_rel: str) -> None:
         text=True,
         encoding="utf-8",
         errors="replace",
+        **_hidden_subprocess_kwargs(),
     )
     if r.returncode != 0:
         tail = (r.stderr or r.stdout or "")[-2000:]
