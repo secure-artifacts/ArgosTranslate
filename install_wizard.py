@@ -29,6 +29,22 @@ FONT_SUB = ("Microsoft YaHei UI", 9)
 FONT_STEP = ("Microsoft YaHei UI", 9)
 CHROME_SUB = "#E8F0FE"
 
+# 仅属于 tk.Label，不能传给 .pack() / .grid()
+_LABEL_WIDGET_KEYS = frozenset(
+    {
+        "wraplength",
+        "anchor",
+        "width",
+        "height",
+        "padx",
+        "pady",
+        "image",
+        "compound",
+        "underline",
+        "cursor",
+    }
+)
+
 
 def _set_wizard_window_icon(root: tk.Tk) -> None:
     if sys.platform != "win32":
@@ -109,8 +125,12 @@ class InstallWizard:
             kw["textvariable"] = textvariable
         else:
             kw["text"] = text
-        lbl = tk.Label(parent, **kw)
-        lbl.pack(**pack_kw)
+        label_extra = {k: pack_kw.pop(k) for k in list(pack_kw) if k in _LABEL_WIDGET_KEYS}
+        lbl = tk.Label(parent, **kw, **label_extra)
+        if pack_kw:
+            lbl.pack(**pack_kw)
+        else:
+            lbl.pack()
         return lbl
 
     def _button(
