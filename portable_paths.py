@@ -12,6 +12,23 @@ def is_install_root(path: Path) -> bool:
     ).is_file()
 
 
+# 主界面启动时必须在安装根目录存在（缺一会弹警告或无法使用功能）
+REQUIRED_RUNTIME_FILES: tuple[str, ...] = (
+    "terminology_bridge.py",
+    "translation_tab_page.py",
+    "portable_ui_theme.py",
+    "native_dll_bootstrap.py",
+    "bkrs_parser.py",
+    "word_info_dialog.py",
+    "patches/argostranslategui_gui.py",
+)
+
+
+def missing_runtime_files(install_root: Path) -> list[str]:
+    root = install_root.resolve()
+    return [name for name in REQUIRED_RUNTIME_FILES if not (root / name).is_file()]
+
+
 def install_pointer_path() -> Path:
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("USERPROFILE") or "."
     return Path(base) / "ArgosTranslatePortable" / "install_path.txt"

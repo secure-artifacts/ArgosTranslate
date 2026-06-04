@@ -160,16 +160,32 @@ def _is_zh_family_source(code: str | None) -> bool:
 
 
 def _portable_bundle_root() -> Path | None:
-    """向上查找含 terminology_bridge.py 或 portable_ui_theme.py 的目录（便携版 ArgosTranslate 根）。"""
+    """便携版安装根目录（优先 install_path.txt，避免从 site-packages 误判）。"""
+    custom = os.environ.get("ARGOS_TRANSLATE_HOME", "").strip()
+    if custom:
+        root = Path(custom).expanduser()
+        if (root / "terminology_bridge.py").is_file():
+            return root.resolve()
+    try:
+        from portable_paths import find_portable_root, is_install_root, load_install_pointer
+
+        saved = load_install_pointer()
+        if saved is not None:
+            return saved
+        root = find_portable_root()
+        if is_install_root(root):
+            return root.resolve()
+    except ImportError:
+        pass
     here = Path(__file__).resolve()
-    for i in range(2, 10):
+    for i in range(2, 12):
         try:
             root = here.parents[i]
         except IndexError:
             break
-        if (root / "terminology_bridge.py").is_file():
-            return root
-        if (root / "portable_ui_theme.py").is_file():
+        if (root / "terminology_bridge.py").is_file() and (
+            root / "venv" / "Scripts" / "pythonw.exe"
+        ).is_file():
             return root
     return None
 

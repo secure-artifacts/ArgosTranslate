@@ -92,6 +92,7 @@ def _set_windows_app_user_model_id() -> None:
 
 def _bootstrap_for_gui(root: Path) -> None:
     os.chdir(root)
+    os.environ["ARGOS_TRANSLATE_HOME"] = str(root.resolve())
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     try:

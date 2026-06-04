@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from portable_paths import is_install_root, save_install_pointer
+from portable_paths import is_install_root, missing_runtime_files, save_install_pointer
 from portable_updater import UPDATE_REL_PATHS
 from network_policy import (
     assert_allowed_download_url,
@@ -701,6 +701,14 @@ def _copy_payload_item(src: Path, dest: Path) -> None:
             shutil.copytree(src, dest, dirs_exist_ok=True)
 
 
+def repair_missing_payload_files(
+    install_root: Path, cb: ProgressCb | None = None
+) -> list[str]:
+    """从安装 exe 内嵌包或开发目录补全 UPDATE_REL_PATHS 中缺失项。返回仍缺失路径。"""
+    _sync_missing_payload_files(install_root, cb)
+    return missing_runtime_files(install_root)
+
+
 def _sync_missing_payload_files(install_root: Path, cb: ProgressCb | None) -> None:
     """已部分释放时补全缺失文件（如 patches/，避免重试安装仍缺补丁）。"""
     missing = [rel for rel in UPDATE_REL_PATHS if not (install_root / rel).exists()]
@@ -914,6 +922,13 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
                 pass
         if not is_install_root(install_root):
             raise RuntimeError("安装未完成：缺少 venv 或程序文件。")
+        still = missing_runtime_files(install_root)
+        if still:
+            raise RuntimeError(
+                "安装不完整，缺少程序文件：\n"
+                + "\n".join(f"  - {n}" for n in still)
+                + "\n\n请用最新版安装 exe 点「清理并重试」，或删除安装目录后重装。"
+            )
         save_install_pointer(install_root)
         try:
             from app_icon_utils import create_start_menu_shortcut
