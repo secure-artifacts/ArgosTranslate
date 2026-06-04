@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from terminology_bridge import glossary_path, portable_root
+from glossary_cell_sanitize import sanitize_glossary_cell
 
 
 def _normalize_pos_import(raw_pos: str) -> str:
@@ -530,7 +531,8 @@ class GlossaryStore:
             for row in reader:
                 if len(row) < 2:
                     continue
-                src, tgt = row[0].strip(), row[1].strip()
+                src = sanitize_glossary_cell(row[0])
+                tgt = sanitize_glossary_cell(row[1])
                 if not src or not tgt:
                     continue
                 if src.lower() in ("中文", "源语", "source", "src"):
@@ -564,8 +566,8 @@ class GlossaryStore:
             for row in ws.iter_rows(min_row=1, values_only=True):
                 if not row or len(row) < 2:
                     continue
-                src = str(row[0]).strip() if row[0] is not None else ""
-                tgt = str(row[1]).strip() if row[1] is not None else ""
+                src = sanitize_glossary_cell(str(row[0]) if row[0] is not None else "")
+                tgt = sanitize_glossary_cell(str(row[1]) if row[1] is not None else "")
                 if not src or not tgt:
                     continue
                 if src.lower() in ("中文", "源语", "source", "src"):

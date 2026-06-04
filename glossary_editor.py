@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import csv
-import io
 import json
 import sys
 import threading
@@ -20,6 +19,7 @@ if str(_root) not in sys.path:
 import terminology_bridge as tb
 
 from glossary_manager import GlossaryStore, infer_pos_for_target
+from glossary_cell_sanitize import parse_clipboard_table, sanitize_glossary_cell
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QKeySequence
@@ -33,7 +33,6 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QShortcut,
     QSizePolicy,
@@ -104,28 +103,148 @@ def _normalize_pos(raw_pos: str) -> str:
     return "noun"
 
 
+class GlossaryPasteTableWidget(QTableWidget):
+    """支持从 Google 表格 / Excel 粘贴，并自动清理 \"\" 等引号。"""
+
+    def __init__(self, rows: int = 0, columns: int = 2, parent=None) -> None:
+        super().__init__(rows, columns, parent)
+        self.setAlternatingRowColors(True)
+        self.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        hdr = self.horizontalHeader()
+        hdr.setStretchLastSection(True)
+        hdr.setSectionResizeMode(0, QHeaderView.Stretch)
+        if columns > 1:
+            hdr.setSectionResizeMode(1, QHeaderView.Stretch)
+        self.verticalHeader().setDefaultSectionSize(28)
+
+    def _cell_text(self, row: int, col: int) -> str:
+        it = self.item(row, col)
+        return sanitize_glossary_cell(it.text() if it else "")
+
+    def paste_from_clipboard(self) -> bool:
+        clip = QApplication.clipboard().text()
+        rows = parse_clipboard_table(clip)
+        if not rows:
+            return False
+        indexes = self.selectedIndexes()
+        if indexes:
+            start_row = min(i.row() for i in indexes)
+            start_col = min(i.column() for i in indexes)
+        else:
+            start_row = 0
+            start_col = 0
+        need = start_row + len(rows)
+        while self.rowCount() < need:
+            self.insertRow(self.rowCount())
+        for i, row_cells in enumerate(rows):
+            for j, cell in enumerate(row_cells):
+                col = start_col + j
+                if col >= self.columnCount():
+                    break
+                self.setItem(start_row + i, col, QTableWidgetItem(cell))
+        return True
+
+    def keyPressEvent(self, event) -> None:
+        if event.matches(QKeySequence.Paste):
+            if self.paste_from_clipboard():
+                return
+        super().keyPressEvent(event)
+
+    def ensure_trailing_blank_row(self) -> None:
+        """末尾保留一行空行，便于继续输入。"""
+        if self.rowCount() == 0:
+            self.insertRow(0)
+            return
+        last = self.rowCount() - 1
+        if any(self._cell_text(last, c) for c in range(self.columnCount())):
+            self.insertRow(self.rowCount())
+        elif self.rowCount() > 1:
+            prev = self.rowCount() - 2
+            if not any(self._cell_text(prev, c) for c in range(self.columnCount())):
+                self.removeRow(last)
+
+
 class BulkAddDialog(QDialog):
-    def __init__(self, src_label: str, tgt_label: str, parent=None):
+    def __init__(
+        self,
+        src_label: str,
+        tgt_label: str,
+        *,
+        show_pos: bool = False,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("批量添加术语")
-        self.setMinimumSize(520, 360)
+        self.setMinimumSize(640, 420)
+        self.resize(720, 480)
+        self._show_pos = bool(show_pos)
+        cols = 3 if self._show_pos else 2
         hint = QLabel(
-            f"每行一条：{src_label}<Tab>{tgt_label}；"
-            f"可选第三列词性（俄语/乌语时有效）。"
+            f"在表格中填写或从 Google 表格 / Excel 复制后 Ctrl+V 粘贴。"
+            f"同一{src_label}可占多行，每行一种{tgt_label}译法。"
+            + (
+                f"第三列可选词性（名词/动词/形容词）。"
+                if self._show_pos
+                else ""
+            )
         )
         hint.setWordWrap(True)
-        self.edit = QPlainTextEdit()
-        self.edit.setPlaceholderText("从 Excel 复制多行后粘贴…")
+        self.table = GlossaryPasteTableWidget(6, cols, self)
+        headers = [f"源语（{src_label}）", f"译文（{tgt_label}）"]
+        if self._show_pos:
+            headers.append("词性")
+        self.table.setHorizontalHeaderLabels(headers)
+        btn_add = QPushButton("添加行")
+        btn_add.clicked.connect(self._add_rows)
+        btn_del = QPushButton("删除选中行")
+        btn_del.clicked.connect(self._delete_selected_rows)
+        tool = QHBoxLayout()
+        tool.addWidget(btn_add)
+        tool.addWidget(btn_del)
+        tool.addStretch()
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
+        buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         lay = QVBoxLayout(self)
         lay.addWidget(hint)
-        lay.addWidget(self.edit, 1)
+        lay.addWidget(self.table, 1)
+        lay.addLayout(tool)
         lay.addWidget(buttons)
 
-    def raw_text(self) -> str:
-        return self.edit.toPlainText().strip()
+    def _add_rows(self) -> None:
+        for _ in range(3):
+            self.table.insertRow(self.table.rowCount())
+
+    def _delete_selected_rows(self) -> None:
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
+        for r in rows:
+            self.table.removeRow(r)
+        if self.table.rowCount() == 0:
+            self.table.insertRow(0)
+
+    def _on_accept(self) -> None:
+        if not self.entries():
+            QMessageBox.warning(
+                self,
+                "批量添加",
+                "请至少填写一行有效的源语与译文。",
+            )
+            return
+        self.accept()
+
+    def entries(self) -> list[tuple[str, str, str]]:
+        out: list[tuple[str, str, str]] = []
+        for r in range(self.table.rowCount()):
+            src = self.table._cell_text(r, 0)
+            tgt = self.table._cell_text(r, 1)
+            if not src and not tgt:
+                continue
+            if not src or not tgt:
+                continue
+            pos_raw = self.table._cell_text(r, 2) if self._show_pos else ""
+            out.append((src, tgt, pos_raw))
+        return out
 
 
 class GlossaryEditorDialog(QDialog):
@@ -159,15 +278,9 @@ class GlossaryEditorDialog(QDialog):
         self.hint.setWordWrap(True)
         self._refresh_hint()
 
-        self.table = QTableWidget(0, 2)
-        hdr = self.table.horizontalHeader()
-        hdr.setStretchLastSection(True)
-        hdr.setSectionResizeMode(0, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table = GlossaryPasteTableWidget(0, 2, self)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setDefaultSectionSize(28)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._update_table_headers()
 
@@ -278,6 +391,7 @@ class GlossaryEditorDialog(QDialog):
             f"编辑当前语言对「{self._src_label()} → {self._tgt_label()}」的术语；"
             "其它语言的译文保存在同一条目中，切换语言对即可查看。"
             "表格改字后点「保存」。"
+            "可从 Google 表格 / Excel 复制后直接 Ctrl+V 粘贴（会自动去掉多余引号）。"
         )
         if self._tgt_code() in ("ru", "uk"):
             text += (
@@ -314,45 +428,42 @@ class GlossaryEditorDialog(QDialog):
         self.hide()
 
     def _build_bulk_entries(
-        self, raw_text: str, tgt_lang: str
+        self, rows: list[tuple[str, str, str]], tgt_lang: str
     ) -> tuple[list[tuple[str, str, str]], list[int]]:
         entries: list[tuple[str, str, str]] = []
         bad: list[int] = []
-        reader = csv.reader(io.StringIO(raw_text), delimiter="\t", quotechar='"')
-        for line_number, columns in enumerate(reader, start=1):
-            cleaned = [item.strip().strip("\ufeff") for item in columns]
-            if not any(cleaned):
+        for line_number, (src_raw, tgt_raw, pos_raw) in enumerate(rows, start=1):
+            src = sanitize_glossary_cell(src_raw)
+            tgt = sanitize_glossary_cell(tgt_raw)
+            if not src and not tgt:
                 continue
-            if len(cleaned) < 2:
+            if not src or not tgt:
                 bad.append(line_number)
                 continue
-            src, tgt = cleaned[0], cleaned[1]
-            pos_raw = cleaned[2] if len(cleaned) >= 3 else ""
             pos = (
                 _normalize_pos(pos_raw)
                 if pos_raw
                 else infer_pos_for_target(tgt, tgt_lang)
             )
-            if not src or not tgt:
-                bad.append(line_number)
-                continue
             entries.append((src, tgt, pos))
         return entries, bad
 
     def _on_bulk_add(self) -> None:
-        dlg = BulkAddDialog(self._src_label(), self._tgt_label(), self)
+        tgt_lang = self._tgt_code()
+        dlg = BulkAddDialog(
+            self._src_label(),
+            self._tgt_label(),
+            show_pos=tgt_lang in ("ru", "uk"),
+            parent=self,
+        )
         if dlg.exec_() != QDialog.Accepted:
             return
-        raw = dlg.raw_text()
-        if not raw:
-            return
-        tgt_lang = self._tgt_code()
-        entries, bad_lines = self._build_bulk_entries(raw, tgt_lang)
+        entries, bad_lines = self._build_bulk_entries(dlg.entries(), tgt_lang)
         if not entries:
             QMessageBox.warning(
                 self,
                 "批量添加",
-                "没有有效行。请确认每行至少有两列（制表符分隔）。",
+                "没有有效行。请在表格中填写源语与译文（可从 Google 表格粘贴）。",
             )
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -440,8 +551,8 @@ class GlossaryEditorDialog(QDialog):
         for r in rows:
             it0 = self.table.item(r, 0)
             it1 = self.table.item(r, 1)
-            src = (it0.text() if it0 else "").strip()
-            tgt = (it1.text() if it1 else "").strip()
+            src = sanitize_glossary_cell(it0.text() if it0 else "")
+            tgt = sanitize_glossary_cell(it1.text() if it1 else "")
             if src and tgt:
                 to_remove.append((src, tgt))
         if not to_remove:
@@ -542,8 +653,8 @@ class GlossaryEditorDialog(QDialog):
                 for r in range(self.table.rowCount()):
                     it0 = self.table.item(r, 0)
                     it1 = self.table.item(r, 1)
-                    src = (it0.text() if it0 else "").strip()
-                    tgt = (it1.text() if it1 else "").strip()
+                    src = sanitize_glossary_cell(it0.text() if it0 else "")
+                    tgt = sanitize_glossary_cell(it1.text() if it1 else "")
                     if not src and not tgt:
                         continue
                     w.writerow([src, tgt])
@@ -594,8 +705,8 @@ class GlossaryEditorDialog(QDialog):
         for r in range(self.table.rowCount()):
             it0 = self.table.item(r, 0)
             it1 = self.table.item(r, 1)
-            src = (it0.text() if it0 else "").strip()
-            tgt_raw = (it1.text() if it1 else "").strip()
+            src = sanitize_glossary_cell(it0.text() if it0 else "")
+            tgt_raw = sanitize_glossary_cell(it1.text() if it1 else "")
             if not src:
                 continue
             if not tgt_raw:
