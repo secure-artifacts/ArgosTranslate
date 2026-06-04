@@ -30,6 +30,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "portable_launcher.py",
     "updater_main.py",
     "run_gui.bat",
+    "本地翻译器.bat",
     "requirements-offline-speech.txt",
     "bulk_text.py",
     "glossary_editor.py",

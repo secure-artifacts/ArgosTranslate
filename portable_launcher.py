@@ -109,9 +109,9 @@ def _bootstrap_for_gui(root: Path) -> None:
 
         apply_gui_patch_to_venv(root)
         try:
-            from app_icon_utils import ensure_start_menu_shortcut
+            from app_icon_utils import ensure_windows_launch_entries
 
-            ensure_start_menu_shortcut(root)
+            ensure_windows_launch_entries(root)
         except ImportError:
             pass
     except ImportError:

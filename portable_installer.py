@@ -1220,10 +1220,9 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
             )
         save_install_pointer(install_root)
         try:
-            from app_icon_utils import create_start_menu_shortcut, ensure_desktop_shortcut
+            from app_icon_utils import ensure_windows_launch_entries
 
-            create_start_menu_shortcut(install_root)
-            ensure_desktop_shortcut(install_root)
+            ensure_windows_launch_entries(install_root)
         except Exception:
             pass
         _emit(cb, 5, 1.0, "安装完成，即将启动软件。")
