@@ -76,10 +76,13 @@ _PIP_IDLE_HEARTBEAT_SEC = 15
 _PIP_INSTALL_STAGES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("PyQt5 界面库", ("PyQt5>=5.15.0",)),
     (
-        "词典与网络请求",
+        "词典与常用组件",
         (
             "beautifulsoup4>=4.12.0",
             "requests>=2.31.0",
+            "lxml>=4.9.0",
+            "zhconv>=1.4.0",
+            "openpyxl>=3.1.0",
         ),
     ),
     (
@@ -95,6 +98,14 @@ _PIP_INSTALL_STAGES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Argos 翻译组件",
         ("argostranslate>=1.9.0", "argostranslategui>=1.6.0"),
     ),
+)
+# (import 名, pip 包) — 启动 / 查词 / 术语常用依赖
+_RUNTIME_PIP_SPECS: tuple[tuple[str, str], ...] = (
+    ("bs4", "beautifulsoup4>=4.12.0"),
+    ("requests", "requests>=2.31.0"),
+    ("lxml", "lxml>=4.9.0"),
+    ("zhconv", "zhconv>=1.4.0"),
+    ("openpyxl", "openpyxl>=3.1.0"),
 )
 _EMBED_ZIP_NAMES = ("python-embed-amd64.zip", "python-embed.zip")
 
@@ -860,7 +871,7 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
         )
     stage_idle_hints = {
         "PyQt5 界面库": "正在解压 PyQt5（体积较大，可能数分钟无新输出）",
-        "词典与网络请求": "正在安装 beautifulsoup4 / requests（查词功能需要）",
+        "词典与常用组件": "正在安装查词 / 术语常用组件（beautifulsoup4、requests 等）",
         "形态分析组件": "正在安装 pymorphy2 词典",
         "CTranslate2 核心": "正在解压 CTranslate2（约 1～3 分钟无新输出属正常）",
         "Argos 翻译组件": "正在安装 Argos / Stanza / PyTorch（解压最慢，请耐心等待）",
@@ -921,32 +932,55 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
             )
     except ImportError:
         pass
-    for mod in ("bs4", "requests"):
+    for mod, _pkg in _RUNTIME_PIP_SPECS:
         if not _python_can_import(py, mod, cwd=install_root):
             raise RuntimeError(
-                f"依赖 {mod} 未安装成功（查词功能需要 beautifulsoup4 / requests）。\n"
+                f"依赖 {mod} 未安装成功。\n"
                 "请点击「清理并重试」重新安装。"
             )
     _emit(cb, 3, 1.0, "翻译依赖安装完成。")
 
 
-def ensure_lookup_python_deps(install_root: Path) -> None:
-    """已安装用户缺 bs4/requests 时静默补装（查词模块 import 需要）。"""
-    py = install_root / "venv" / "Scripts" / "python.exe"
-    if not py.is_file():
-        return
-    need: list[str] = []
-    if not _python_can_import(py, "bs4", cwd=install_root):
-        need.append("beautifulsoup4>=4.12.0")
-    if not _python_can_import(py, "requests", cwd=install_root):
-        need.append("requests>=2.31.0")
-    if not need:
-        return
-    wheels = _bundled_install_wheels_dir()
-    if wheels is None:
+def _resolve_install_wheels_dir(install_root: Path | None = None) -> Path | None:
+    bundled = _bundled_install_wheels_dir()
+    if bundled is not None:
+        return bundled
+    if install_root is not None:
         cache = install_root / "data" / "install" / "install_wheels"
         if cache.is_dir() and any(cache.glob("*.whl")):
-            wheels = cache
+            return cache
+    return None
+
+
+def _persist_install_wheels_cache(install_root: Path) -> None:
+    """缓存 pip wheel 到安装目录，供后续 pythonw 启动时离线补装依赖。"""
+    src = _bundled_install_wheels_dir()
+    if src is None:
+        return
+    dest = install_root / "data" / "install" / "install_wheels"
+    try:
+        if dest.is_dir() and len(list(dest.glob("*.whl"))) >= len(list(src.glob("*.whl"))):
+            return
+        dest.mkdir(parents=True, exist_ok=True)
+        for whl in src.glob("*.whl"):
+            target = dest / whl.name
+            if not target.is_file() or target.stat().st_size != whl.stat().st_size:
+                shutil.copy2(whl, target)
+    except OSError:
+        pass
+
+
+persist_install_wheels_cache = _persist_install_wheels_cache
+
+
+def _pip_install_missing(
+    py: Path,
+    install_root: Path,
+    packages: tuple[str, ...],
+) -> bool:
+    if not packages:
+        return True
+    wheels = _resolve_install_wheels_dir(install_root)
     attempts: list[tuple[str, str, bool]] = []
     if wheels is not None:
         attempts.append(("内置离线包", "", True))
@@ -956,24 +990,40 @@ def ensure_lookup_python_deps(install_root: Path) -> None:
     for _src, index_url, offline in attempts:
         cmd = _pip_packages_cmd(
             py,
-            tuple(need),
+            packages,
             index_url,
             wheels_dir=wheels,
             offline=offline,
         )
         try:
             _run(cmd, cwd=install_root)
-            if all(
-                _python_can_import(py, m, cwd=install_root)
-                for m in ("bs4", "requests")
-            ):
-                return
+            return True
         except RuntimeError:
             continue
+    return False
 
 
-def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> None:
-    _emit(cb, 4, 0.1, "正在应用界面补丁…")
+def ensure_runtime_python_deps(install_root: Path) -> None:
+    """已安装用户缺运行时 pip 包时静默补装。"""
+    py = install_root / "venv" / "Scripts" / "python.exe"
+    if not py.is_file():
+        return
+    need: list[str] = []
+    for mod, pkg in _RUNTIME_PIP_SPECS:
+        if not _python_can_import(py, mod, cwd=install_root):
+            need.append(pkg)
+    if not need:
+        return
+    _pip_install_missing(py, install_root, tuple(need))
+
+
+def ensure_lookup_python_deps(install_root: Path) -> None:
+    """兼容旧名。"""
+    ensure_runtime_python_deps(install_root)
+
+
+def apply_gui_patch_to_venv(install_root: Path) -> bool:
+    """将 patches/argostranslategui_gui.py 同步到 venv（更新 / 启动时调用）。"""
     patch = install_root / "patches" / "argostranslategui_gui.py"
     dst = (
         install_root
@@ -983,10 +1033,24 @@ def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> Non
         / "argostranslategui"
         / "gui.py"
     )
+    if not patch.is_file() or not dst.parent.is_dir():
+        return False
+    try:
+        shutil.copy2(patch, dst)
+        return True
+    except OSError:
+        return False
+
+
+def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> None:
+    _emit(cb, 4, 0.1, "正在应用界面补丁…")
+    if apply_gui_patch_to_venv(install_root):
+        _emit(cb, 4, 1.0, "界面补丁已应用。")
+        return
+    patch = install_root / "patches" / "argostranslategui_gui.py"
     if not patch.is_file():
         _sync_missing_payload_files(install_root, cb)
-    if patch.is_file() and dst.parent.is_dir():
-        shutil.copy2(patch, dst)
+    if apply_gui_patch_to_venv(install_root):
         _emit(cb, 4, 1.0, "界面补丁已应用。")
         return
     if not patch.is_file():
@@ -997,7 +1061,7 @@ def _apply_gui_patch(install_root: Path, py: Path, cb: ProgressCb | None) -> Non
     tool = install_root / "tools" / "apply_portable_gui_patch.py"
     if tool.is_file():
         _run(
-            [str(py), str(tool)],
+            [str(py), str(tool), "--force"],
             cwd=install_root,
         )
         _emit(cb, 4, 1.0, "界面补丁已应用。")
@@ -1012,6 +1076,7 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
         _deploy_payload(install_root, cb)
         py = _create_venv(install_root, cb)
         _pip_install(py, install_root, cb)
+        _persist_install_wheels_cache(install_root)
         _apply_gui_patch(install_root, py, cb)
         write_version = install_root / "version.json"
         if not write_version.is_file():

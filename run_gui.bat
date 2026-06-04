@@ -33,6 +33,7 @@ set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 set "ARGOS_FAST_STARTUP=1"
 set "ARGOS_DEBUG=0"
+set "ARGOS_TRANSLATE_HOME=%ROOT%"
 cd /d "%ROOT%"
 
 echo.
@@ -40,7 +41,7 @@ echo [Local Translator] Starting. Window in about 2 seconds.
 echo.
 
 if exist "%ROOT%\tools\apply_portable_gui_patch.py" (
-    "%ROOT%\venv\Scripts\python.exe" "%ROOT%\tools\apply_portable_gui_patch.py" >nul 2>&1
+    "%ROOT%\venv\Scripts\python.exe" "%ROOT%\tools\apply_portable_gui_patch.py" --force >nul 2>&1
 )
 
 if exist "%ROOT%\portable_launcher.py" (

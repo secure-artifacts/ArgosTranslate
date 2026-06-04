@@ -49,6 +49,9 @@ def _ensure_install_wheels(py: Path) -> Path:
         and any(wheels_dir.glob("argostranslate-*.whl"))
         and any(wheels_dir.glob("beautifulsoup4-*.whl"))
         and any(wheels_dir.glob("requests-*.whl"))
+        and any(wheels_dir.glob("lxml-*.whl"))
+        and any(wheels_dir.glob("zhconv-*.whl"))
+        and any(wheels_dir.glob("openpyxl-*.whl"))
     )
     if need:
         print(f"[INFO] downloading install wheels -> {wheels_dir}")

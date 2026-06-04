@@ -104,7 +104,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "ui_session.py",
     "startup_warmup.py",
     "vcredist_helper.py",
-    "tools",
+    "tools/apply_portable_gui_patch.py",
     "patches/argostranslategui_gui.py",
     "命令",
 )
@@ -296,6 +296,16 @@ def apply_update(
         errors.append(f"version.json: {e}")
 
     save_install_pointer(target_root)
+    try:
+        from portable_installer import (
+            apply_gui_patch_to_venv,
+            ensure_runtime_python_deps,
+        )
+
+        apply_gui_patch_to_venv(target_root)
+        ensure_runtime_python_deps(target_root)
+    except ImportError:
+        pass
     return count, errors
 
 
@@ -305,14 +315,18 @@ def launch_gui(target_root: Path) -> bool:
         os.startfile(str(bat))
         return True
     pyw = target_root / "venv" / "Scripts" / "pythonw.exe"
-    if pyw.is_file():
+    script = target_root / "portable_launcher.py"
+    if pyw.is_file() and script.is_file():
         import subprocess
 
         from win_path_utils import subprocess_hide_window_kwargs
 
+        env = os.environ.copy()
+        env["ARGOS_TRANSLATE_HOME"] = str(target_root.resolve())
         subprocess.Popen(
-            [str(pyw), "-c", "from argostranslategui import gui; gui.main()"],
+            [str(pyw), str(script)],
             cwd=str(target_root),
+            env=env,
             **subprocess_hide_window_kwargs(),
         )
         return True
