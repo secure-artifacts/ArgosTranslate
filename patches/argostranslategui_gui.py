@@ -180,8 +180,13 @@ def _prepare_native_dll(root: Path | None) -> None:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     try:
-        from native_dll_bootstrap import prepare_native_dll_paths, preload_torch_dlls
+        from native_dll_bootstrap import (
+            prepare_native_dll_paths,
+            prepare_qt_plugin_paths,
+            preload_torch_dlls,
+        )
 
+        prepare_qt_plugin_paths(root)
         prepare_native_dll_paths(root)
         preload_torch_dlls(root)
     except Exception:

@@ -1,11 +1,71 @@
 """
-Windows：在导入 torch / ctranslate2 之前把 DLL 目录加入搜索路径，缓解 WinError 1114。
+Windows：在导入 PyQt5 / torch / ctranslate2 之前配置 DLL 与 Qt 插件路径。
 """
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
+
+
+def find_qt_platforms_dir(portable_root: Path) -> Path | None:
+    """返回含 qwindows.dll 的 platforms 目录。"""
+    site = portable_root / "venv" / "Lib" / "site-packages"
+    for plugins in (
+        site / "PyQt5" / "Qt5" / "plugins",
+        site / "PyQt5" / "Qt" / "plugins",
+    ):
+        platforms = plugins / "platforms"
+        if (platforms / "qwindows.dll").is_file():
+            return platforms.resolve()
+    return None
+
+
+def prepare_qt_plugin_paths(portable_root: Path | None = None) -> bool:
+    """
+    必须在 import PyQt5 之前调用。
+    返回是否找到 qwindows.dll。
+    """
+    if sys.platform != "win32" or portable_root is None:
+        return False
+    platforms = find_qt_platforms_dir(portable_root)
+    if platforms is None:
+        return False
+    plugins_parent = platforms.parent
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(platforms)
+    os.environ.setdefault("QT_PLUGIN_PATH", str(plugins_parent))
+    os.environ.setdefault("QT_QPA_PLATFORM", "windows")
+
+    site = portable_root / "venv" / "Lib" / "site-packages"
+    bin_dirs: list[str] = []
+    for rel in ("PyQt5/Qt5/bin", "PyQt5/Qt/bin"):
+        d = site / rel.replace("/", os.sep)
+        if d.is_dir():
+            bin_dirs.append(str(d.resolve()))
+    if bin_dirs:
+        old = os.environ.get("PATH", "")
+        prefix = os.pathsep.join(bin_dirs)
+        os.environ["PATH"] = prefix + ((os.pathsep + old) if old else "")
+    return True
+
+
+def runtime_env_for_root(portable_root: Path) -> dict[str, str]:
+    """供 subprocess.Popen 合并的便携运行环境（含 Qt 插件路径）。"""
+    prepare_qt_plugin_paths(portable_root)
+    prepare_native_dll_paths(portable_root)
+    keys = (
+        "QT_QPA_PLATFORM_PLUGIN_PATH",
+        "QT_PLUGIN_PATH",
+        "QT_QPA_PLATFORM",
+        "PATH",
+        "KMP_DUPLICATE_LIB_OK",
+        "CUDA_VISIBLE_DEVICES",
+        "CTRANSLATE2_LOG_LEVEL",
+        "ARGOS_DEVICE_TYPE",
+        "OMP_NUM_THREADS",
+        "PYTORCH_ENABLE_MPS_FALLBACK",
+    )
+    return {k: os.environ[k] for k in keys if os.environ.get(k)}
 
 
 def prepare_native_dll_paths(portable_root: Path | None = None) -> None:

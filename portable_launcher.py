@@ -52,18 +52,23 @@ def _apply_portable_env(root: Path) -> dict[str, str]:
     env.setdefault("CTRANSLATE2_LOG_LEVEL", "ERROR")
     env.setdefault("ARGOS_DEVICE_TYPE", "cpu")
     env.setdefault("OMP_NUM_THREADS", "1")
-    if sys.platform == "win32":
-        dll_dirs = [
-            root / "venv" / "Lib" / "site-packages" / "torch" / "lib",
-            root / "venv" / "Lib" / "site-packages" / "ctranslate2",
-            root / "venv" / "Lib" / "site-packages" / "vosk",
-        ]
-        extra = [str(d.resolve()) for d in dll_dirs if d.is_dir()]
-        if extra:
-            old = env.get("PATH", "")
-            env["PATH"] = os.pathsep.join(extra) + (
-                (os.pathsep + old) if old else ""
-            )
+    try:
+        from native_dll_bootstrap import runtime_env_for_root
+
+        env.update(runtime_env_for_root(root))
+    except ImportError:
+        if sys.platform == "win32":
+            dll_dirs = [
+                root / "venv" / "Lib" / "site-packages" / "torch" / "lib",
+                root / "venv" / "Lib" / "site-packages" / "ctranslate2",
+                root / "venv" / "Lib" / "site-packages" / "vosk",
+            ]
+            extra = [str(d.resolve()) for d in dll_dirs if d.is_dir()]
+            if extra:
+                old = env.get("PATH", "")
+                env["PATH"] = os.pathsep.join(extra) + (
+                    (os.pathsep + old) if old else ""
+                )
     return env
 
 
@@ -90,8 +95,13 @@ def _bootstrap_for_gui(root: Path) -> None:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     try:
-        from native_dll_bootstrap import prepare_native_dll_paths, preload_torch_dlls
+        from native_dll_bootstrap import (
+            prepare_native_dll_paths,
+            prepare_qt_plugin_paths,
+            preload_torch_dlls,
+        )
 
+        prepare_qt_plugin_paths(root)
         prepare_native_dll_paths(root)
         preload_torch_dlls(root)
     except Exception:
@@ -217,6 +227,15 @@ def main() -> int:
     except Exception:
         pass
     try:
+        if sys.platform == "win32":
+            from native_dll_bootstrap import find_qt_platforms_dir
+
+            if find_qt_platforms_dir(root) is None:
+                raise RuntimeError(
+                    "未找到 PyQt5 的 qwindows.dll。\n"
+                    "请在安装向导中点「清理并重试」重新安装，"
+                    "或删除 venv 后再次运行安装程序。"
+                )
         import importlib
 
         gui = importlib.import_module("argostranslategui.gui")

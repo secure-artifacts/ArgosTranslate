@@ -850,6 +850,16 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
                 "请检查网络，或通过 ARGOS_PIP_INDEX_URL 指定可用源（不得使用中国大陆 / .cn 镜像）。\n"
                 "也可点击「清理并重试」后再次安装。"
             )
+    try:
+        from native_dll_bootstrap import find_qt_platforms_dir
+
+        if find_qt_platforms_dir(install_root) is None:
+            raise RuntimeError(
+                "PyQt5 安装不完整：未找到 Qt 平台插件 qwindows.dll。\n"
+                "请点击「清理并重试」重新安装；若仍失败，请换英文路径（如 D:\\ArgosTranslate）。"
+            )
+    except ImportError:
+        pass
     _emit(cb, 3, 1.0, "翻译依赖安装完成。")
 
 
@@ -932,6 +942,12 @@ def launch_app(install_root: Path) -> int:
     env["XDG_DATA_HOME"] = str(install_root / "data" / "local")
     env["XDG_CONFIG_HOME"] = str(install_root / "data" / "config")
     env["XDG_CACHE_HOME"] = str(install_root / "data" / "cache")
+    try:
+        from native_dll_bootstrap import runtime_env_for_root
+
+        env.update(runtime_env_for_root(install_root))
+    except ImportError:
+        pass
     subprocess.Popen(
         [str(pyw), str(script)],
         cwd=str(install_root),
