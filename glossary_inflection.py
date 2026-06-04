@@ -375,6 +375,23 @@ def extract_term_meta(entry: Any, to_code: str) -> dict[str, Any]:
             val = v
             break
 
+    if isinstance(val, list) and val:
+        first = val[0]
+        if isinstance(first, str):
+            meta["surface"] = first.strip()
+            if code in ("ru", "uk"):
+                analysis = analyze_slavic_phrase(first.strip(), code)
+                meta["lemma"] = str(analysis.get("lemma") or first.strip())
+                meta["words"] = analysis.get("words") or []
+            else:
+                meta["lemma"] = first.strip()
+            pos = entry.get("pos")
+            if isinstance(pos, str) and pos.strip():
+                meta["pos"] = pos.strip().lower()
+            return meta
+        if isinstance(first, dict):
+            val = first
+
     if isinstance(val, str):
         meta["surface"] = val.strip()
         if code in ("ru", "uk"):

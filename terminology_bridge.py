@@ -14,6 +14,11 @@ from typing import Any
 
 import glossary_inflection as gi
 
+try:
+    import glossary_alternatives as ga
+except ImportError:
+    ga = None  # type: ignore
+
 _bulk_prepare_fn: Any = None
 
 
@@ -94,6 +99,13 @@ def target_cell_text(entry: Any, lang_code: str) -> str:
     if not isinstance(entry, dict):
         return str(entry) if entry is not None else ""
     val = entry.get(code)
+    if isinstance(val, list):
+        parts: list[str] = []
+        for item in val:
+            t = target_cell_text({code: item}, lang_code)
+            if t:
+                parts.append(t)
+        return " / ".join(parts)
     if isinstance(val, str):
         return val
     if isinstance(val, dict):
@@ -235,40 +247,95 @@ def _ru_inflect(lemma: str, grammemes: list[str]) -> str | None:
     return inf.word
 
 
-def _resolve_ru_dict(d: dict[str, Any]) -> str | None:
-    """返回 lemma（不在此处变格；变格在 restore_markers 时按句上下文进行）。"""
-    lemma = str(d.get("lemma") or "").strip()
-    return lemma or None
+def _raw_target_string(entry: Any, to_code: str) -> str:
+    """术语条目中的目标语原始字符串（未拆多义）。"""
+    code = (to_code or "").strip().lower()
+    if isinstance(entry, str):
+        return entry.strip()
+    if not isinstance(entry, dict):
+        return str(entry or "").strip()
+    val = None
+    for k, v in entry.items():
+        if isinstance(k, str) and k.strip().lower() == code:
+            val = v
+            break
+    if val is None:
+        val = entry.get("default")
+    if isinstance(val, list):
+        parts: list[str] = []
+        if ga is not None:
+            for item in val:
+                parts.extend(ga.stored_rows_as_strings(item))
+        else:
+            for item in val:
+                s = str(item).strip() if not isinstance(item, dict) else str(
+                    item.get("surface") or item.get("lemma") or ""
+                ).strip()
+                if s:
+                    parts.append(s)
+        return " / ".join(parts)
+    if isinstance(val, str):
+        return val.strip()
+    if isinstance(val, dict):
+        return str(val.get("surface") or val.get("lemma") or "").strip()
+    if code in ("ru", "uk"):
+        lem = gi.term_lemma_from_entry(entry, code)
+        if lem:
+            return lem
+    val = entry.get("default")
+    if isinstance(val, str):
+        return val.strip()
+    return ""
+
+
+def _lemma_for_chosen(chosen: str, to_code: str) -> str:
+    text = (chosen or "").strip()
+    if not text:
+        return ""
+    code = (to_code or "").strip().lower()
+    if code in ("ru", "uk"):
+        analysis = gi.analyze_slavic_phrase(text, code)
+        return str(analysis.get("lemma") or text).strip() or text
+    return text
 
 
 def _resolve_target(entry: Any, to_code: str) -> str | None:
     to_code = (to_code or "").strip().lower()
     if entry is None:
         return None
+    if ga is not None:
+        chosen, _, _ = ga.pick_for_translation(entry, to_code)
+        if chosen:
+            return _lemma_for_chosen(chosen, to_code)
+    raw = _raw_target_string(entry, to_code)
+    if not raw:
+        return None
     if to_code in ("ru", "uk"):
         lem = gi.term_lemma_from_entry(entry, to_code)
         if lem:
             return lem
     if isinstance(entry, str):
-        s = entry.strip()
-        return s or None
+        return entry.strip() or None
     if not isinstance(entry, dict):
-        s = str(entry).strip()
-        return s or None
+        return str(entry).strip() or None
     for k, val in entry.items():
         if isinstance(k, str) and k.strip().lower() == to_code:
             if isinstance(val, str):
-                s = val.strip()
-                return s or None
+                return val.strip() or None
             if isinstance(val, dict):
                 lem = str(val.get("lemma") or "").strip()
                 return lem or None
             break
     val = entry.get("default")
     if isinstance(val, str):
-        s = val.strip()
-        return s or None
+        return val.strip() or None
     return None
+
+
+def _resolve_ru_dict(d: dict[str, Any]) -> str | None:
+    """返回 lemma（不在此处变格；变格在 restore_markers 时按句上下文进行）。"""
+    lemma = str(d.get("lemma") or "").strip()
+    return lemma or None
 
 
 def _to_fullwidth_latin_digits(s: str) -> str:
@@ -306,12 +373,27 @@ def mask_source_terms(
     out = text
     used = 0
     for key in keys:
-        repl = _resolve_target(glossary[key], to_code)
+        entry = glossary[key]
+        if ga is not None:
+            chosen_surface, alternatives, chosen_index = ga.pick_for_translation(
+                entry, to_code
+            )
+            repl = _lemma_for_chosen(chosen_surface, to_code) if chosen_surface else None
+        else:
+            repl = _resolve_target(entry, to_code)
+            alternatives = [repl] if repl else []
+            chosen_index = 0
+            chosen_surface = alternatives[0] if alternatives else ""
         if not repl:
             continue
-        meta = gi.extract_term_meta(glossary[key], to_code)
+        meta = gi.extract_term_meta(
+            {to_code: chosen_surface} if chosen_surface else entry, to_code
+        )
         if not meta.get("lemma"):
             meta["lemma"] = repl
+        raw_cell = _raw_target_string(entry, to_code) or repl
+        if ga is not None and not alternatives:
+            alternatives = ga.list_options_from_entry(entry, to_code) or [repl]
         while key in out:
             surface, ascii_m = _glossary_surface_marker(used)
             used += 1
@@ -325,6 +407,10 @@ def mask_source_terms(
                     "pos": meta.get("pos"),
                     "words": meta.get("words") or [],
                     "replacement": repl,
+                    "zh_source": key,
+                    "raw_cell": raw_cell,
+                    "alternatives": alternatives,
+                    "chosen_index": chosen_index,
                 }
             )
     return out, slots
@@ -384,23 +470,66 @@ def _slot_replacement(
 def restore_markers(
     translated: str, slots: list[dict[str, Any]], *, to_code: str = ""
 ) -> str:
+    out, _ = restore_markers_with_spans(translated, slots, to_code=to_code)
+    return out
+
+
+def restore_markers_with_spans(
+    translated: str,
+    slots: list[dict[str, Any]],
+    *,
+    to_code: str = "",
+) -> tuple[str, list[dict[str, Any]]]:
     """
     将译文中的术语占位符还原为带变格的术语形（俄/乌）或固定译文（其它语言）。
     送入模型的是全角「ＧＬＯＳＳＡ００００」；译文中也可能被规范成半角
     GLOSSA0000，或被插空格 / 西里尔同形字母，故做多轮替换与容错正则。
     """
     if not slots:
-        return translated
+        return translated, []
     out = unicodedata.normalize("NFKC", translated or "")
     code = (to_code or "").strip().lower()
+    spans: list[dict[str, Any]] = []
     by_ascii = {
         s["marker_ascii"]: s for s in slots if s.get("marker_ascii")
     }
+
+    def _record_span(start: int, end: int, slot: dict[str, Any], surface: str) -> None:
+        if end <= start or not surface:
+            return
+        alts = slot.get("alternatives")
+        if not isinstance(alts, list) or len(alts) < 2:
+            return
+        spans.append(
+            {
+                "start": start,
+                "end": end,
+                "surface": surface,
+                "zh_source": str(slot.get("zh_source") or ""),
+                "raw_cell": str(slot.get("raw_cell") or ""),
+                "alternatives": list(alts),
+                "chosen_index": int(slot.get("chosen_index") or 0),
+                "lemma": str(slot.get("lemma") or slot.get("replacement") or ""),
+                "fixed_grammemes": slot.get("fixed_grammemes"),
+                "pos": slot.get("pos"),
+                "words": slot.get("words") if isinstance(slot.get("words"), list) else [],
+                "context_before": out[:start],
+                "context_after": out[end:],
+                "target_lang": code,
+            }
+        )
 
     def _repl_at(match: re.Match[str], slot: dict[str, Any]) -> str:
         before = out[: match.start()]
         after = out[match.end() :]
         return _slot_replacement(slot, before, after, code)
+
+    def _insert_repl(start: int, end: int, repl: str, slot: dict[str, Any]) -> None:
+        nonlocal out
+        before = out[:start]
+        after = out[end:]
+        _record_span(len(before), len(before) + len(repl), slot, repl)
+        out = before + repl + after
 
     # 精确标记（全角 / 半角）
     ordered = sorted(slots, key=_slot_sort_key, reverse=True)
@@ -416,7 +545,7 @@ def restore_markers(
                 before = out[:idx]
                 after = out[idx + len(key) :]
                 repl = _slot_replacement(s, before, after, code)
-                out = before + repl + after
+                _insert_repl(idx, idx + len(key), repl, s)
                 start = idx + len(repl)
 
     # 容错：G L O S S A 0001、glossa0001、零宽空白等（半角）
@@ -489,6 +618,42 @@ def restore_markers(
             return _repl_at(mm, slot)
 
         out = pat.sub(_spaced_repl, out)
+    return out, spans
+
+
+def relocate_glossary_spans(text: str, spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """后处理可能改动词形：在最终译文中重新定位术语高亮区间。"""
+    if not text or not spans:
+        return []
+    out: list[dict[str, Any]] = []
+    used_ranges: list[tuple[int, int]] = []
+    for sp in sorted(spans, key=lambda s: int(s.get("start") or 0)):
+        surface = str(sp.get("surface") or "").strip()
+        if not surface:
+            continue
+        start_hint = int(sp.get("start") or 0)
+        idx = -1
+        for probe in (surface, surface.lower(), surface.capitalize()):
+            pos = text.find(probe, max(0, start_hint - 48))
+            if pos < 0:
+                pos = text.find(probe)
+            if pos >= 0:
+                end = pos + len(probe)
+                if not any(not (end <= a or pos >= b) for a, b in used_ranges):
+                    idx = pos
+                    surface = probe
+                    break
+        if idx < 0:
+            continue
+        end = idx + len(surface)
+        used_ranges.append((idx, end))
+        row = dict(sp)
+        row["start"] = idx
+        row["end"] = end
+        row["surface"] = surface
+        row["context_before"] = text[:idx]
+        row["context_after"] = text[end:]
+        out.append(row)
     return out
 
 
@@ -512,6 +677,19 @@ def apply_glossary(
     *,
     on_progress=None,
 ) -> str:
+    return apply_glossary_with_spans(
+        translation, text, from_code, to_code, on_progress=on_progress
+    )[0]
+
+
+def apply_glossary_with_spans(
+    translation,
+    text: str,
+    from_code: str,
+    to_code: str,
+    *,
+    on_progress=None,
+) -> tuple[str, list[dict[str, Any]]]:
     def tr(s: str) -> str:
         prepared = _prepare_for_argos_engine(s)
         fn = translation.translate
@@ -523,14 +701,13 @@ def apply_glossary(
         return fn(prepared)
 
     if not (text or "").strip():
-        return tr(text)
+        return tr(text), []
     if not should_apply_glossary(from_code, to_code):
-        return tr(text)
+        return tr(text), []
     glossary = load_glossary()
     masked, slots = mask_source_terms(text, glossary, to_code)
     if not slots:
-        return tr(text)
+        return tr(text), []
     raw = tr(masked)
-    out = restore_markers(raw, slots, to_code=to_code)
-    # Argos 俄/乌后处理在 GUI update_right_textEdit 统一执行，此处不再重复（长文可省近一倍时间）
-    return out
+    out, spans = restore_markers_with_spans(raw, slots, to_code=to_code)
+    return out, spans

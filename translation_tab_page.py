@@ -201,6 +201,8 @@ class TranslationTabPage(QWidget):
         self._segmented_mode = False
         self._segmented_worker = None
         self._segmented_translate_seq = 0
+        self._last_translate_key: tuple[str, str, str] | None = None
+        self._pending_glossary_spans: list = []
         self._src_placeholder_normal = ""
 
         root = host._portable_root
@@ -230,7 +232,7 @@ class TranslationTabPage(QWidget):
         layout.addWidget(lang_bar)
 
         self.left_textEdit = SourceTranslationTextEdit()
-        from translation_source_edit import TargetTranslationTextEdit
+        from glossary_target_edit import GlossaryTargetTranslationTextEdit
         from argostranslategui.gui import _fast_startup_enabled
 
         if root is not None and _fast_startup_enabled():
@@ -250,7 +252,7 @@ class TranslationTabPage(QWidget):
         self.left_textEdit.textChanged.connect(self._schedule_char_count_update)
         self.left_textEdit.textChanged.connect(self._schedule_translate_debounce)
 
-        self.right_textEdit = TargetTranslationTextEdit()
+        self.right_textEdit = GlossaryTargetTranslationTextEdit()
         if root is not None and _fast_startup_enabled():
             _tgt_ph = "译文"
         else:
@@ -780,13 +782,15 @@ class TranslationTabPage(QWidget):
                 pass
 
         if use_glossary:
-            raw = tb.apply_glossary(
+            raw, gloss_spans = tb.apply_glossary_with_spans(
                 translation,
                 input_text_raw,
                 fc,
                 tc,
             )
+            self._pending_glossary_spans = gloss_spans
         else:
+            self._pending_glossary_spans = []
             prep = self._prepare_argos_translate_input(
                 input_text_raw, fc, tc, tb=tb, bm=bm
             )
@@ -862,6 +866,7 @@ class TranslationTabPage(QWidget):
             self._segmented_worker is not None
             and self._segmented_worker.isRunning()
         ):
+            self._invalidate_inflight_translation()
             self._translate_reschedule = True
 
     def _toggle_segmented_mode(self, enabled: bool) -> None:
@@ -921,11 +926,13 @@ class TranslationTabPage(QWidget):
         self._translate_debounce.setInterval(ms)
         self._translate_debounce.start()
         if self.worker_thread is not None and self.worker_thread.isRunning():
+            self._invalidate_inflight_translation()
             self._translate_reschedule = True
         if (
             self._segmented_worker is not None
             and self._segmented_worker.isRunning()
         ):
+            self._invalidate_inflight_translation()
             self._translate_reschedule = True
 
     def _warmup_current_language_pair(self) -> None:
@@ -1166,16 +1173,28 @@ class TranslationTabPage(QWidget):
     def _word_lookup_text_edits_ready(self) -> bool:
         return (
             self.left_textEdit.__class__.__name__ == "ClickableTranslationTextEdit"
-            and self.right_textEdit.__class__.__name__ == "ClickableTranslationTextEdit"
+            and self.right_textEdit.__class__.__name__
+            in ("ClickableTranslationTextEdit", "GlossaryClickableTargetTextEdit")
         )
 
     def _replace_text_edit_with_clickable(
         self, attr: str, *, role: str, wi_mod
     ) -> None:
         old = getattr(self, attr)
-        if old.__class__.__name__ == "ClickableTranslationTextEdit":
+        if attr == "right_textEdit":
+            if old.__class__.__name__ == "GlossaryClickableTargetTextEdit":
+                return
+        elif old.__class__.__name__ == "ClickableTranslationTextEdit":
             return
-        new = wi_mod.ClickableTranslationTextEdit(self, role=role)
+        if attr == "right_textEdit":
+            from glossary_target_edit import make_glossary_clickable_target_class
+
+            cls = make_glossary_clickable_target_class(
+                wi_mod.ClickableTranslationTextEdit
+            )
+            new = cls(self, role=role)
+        else:
+            new = wi_mod.ClickableTranslationTextEdit(self, role=role)
         new.setPlainText(old.toPlainText())
         new.setPlaceholderText(old.placeholderText())
         new.setMinimumHeight(old.minimumHeight())
@@ -1244,12 +1263,30 @@ class TranslationTabPage(QWidget):
             self.right_textEdit.blockSignals(False)
         self._update_char_counts()
 
-    def _cancel_pending_translation(self) -> None:
-        """原文已空或需重置时：停止去抖定时器并丢弃排队/进行中的译稿回写。"""
-        self._translate_debounce.stop()
+    def _invalidate_inflight_translation(self) -> None:
+        """原文或语言对已变：丢弃进行中的译稿回写。"""
         self._translate_seq += 1
         self._segmented_translate_seq += 1
+
+    def _translation_source_key(
+        self, text: str, from_code: str, to_code: str
+    ) -> tuple[str, str, str]:
+        return (
+            (from_code or "").strip().lower(),
+            (to_code or "").strip().lower(),
+            text or "",
+        )
+
+    def _stop_translate_debounce_timers(self) -> None:
+        self._translate_debounce.stop()
+        self._speech_translate_debounce.stop()
+
+    def _cancel_pending_translation(self) -> None:
+        """原文已空或需重置时：停止去抖定时器并丢弃排队/进行中的译稿回写。"""
+        self._stop_translate_debounce_timers()
+        self._invalidate_inflight_translation()
         self._translate_reschedule = False
+        self._last_translate_key = None
         self.queued_translation = None
         self._set_feedback_message("")
 
@@ -1610,6 +1647,7 @@ class TranslationTabPage(QWidget):
             self._segmented_worker is not None
             and self._segmented_worker.isRunning()
         ):
+            self._invalidate_inflight_translation()
             self._translate_reschedule = True
             self._set_feedback_message("正在逐句翻译…")
             return
@@ -1652,6 +1690,14 @@ class TranslationTabPage(QWidget):
         bm = _import_bulk_text_module()
         fc = input_language.code
         tc = output_language.code
+        src_key = self._translation_source_key("\n".join(lines), fc, tc)
+        if (
+            not self._translate_reschedule
+            and src_key == self._last_translate_key
+            and self._segmented_worker is None
+        ):
+            return
+        self._stop_translate_debounce_timers()
         self._segmented_translate_seq += 1
         seq = self._segmented_translate_seq
         self._translate_reschedule = False
@@ -1705,12 +1751,23 @@ class TranslationTabPage(QWidget):
         worker.start()
 
     def _handle_segmented_worker_finished(self) -> None:
+        sender = self.sender()
+        if sender is not None and sender is not self._segmented_worker:
+            return
         self._segmented_worker = None
         self._maybe_show_uk_morph_install_notice()
         if self._translate_reschedule:
+            self._stop_translate_debounce_timers()
             self._translate_reschedule = False
             QTimer.singleShot(80, self._translate_segmented)
             return
+        li = self._language_at_combo_index(self.left_language_combo.currentIndex())
+        ri = self._language_at_combo_index(self.right_language_combo.currentIndex())
+        if li is not None and ri is not None:
+            joined = "\n".join(self._source_text_lines())
+            self._last_translate_key = self._translation_source_key(
+                joined, li.code, ri.code
+            )
         self._set_feedback_message("")
 
     def translate(self) -> None:
@@ -1740,6 +1797,7 @@ class TranslationTabPage(QWidget):
         if input_language is None or output_language is None:
             return
         if self.worker_thread is not None and self.worker_thread.isRunning():
+            self._invalidate_inflight_translation()
             self._translate_reschedule = True
             self._set_feedback_message("正在翻译…")
             return
@@ -1781,11 +1839,19 @@ class TranslationTabPage(QWidget):
         fc = input_language.code
         tc = output_language.code
         source_snapshot = input_text_raw
+        src_key = self._translation_source_key(source_snapshot, fc, tc)
+        if (
+            not self._translate_reschedule
+            and src_key == self._last_translate_key
+            and self.worker_thread is None
+        ):
+            return
 
         self._translate_seq += 1
         seq = self._translate_seq
         self._target_postprocess_done = False
         self._translate_reschedule = False
+        self._stop_translate_debounce_timers()
         self._set_feedback_message("正在翻译…")
         tab = self
 
@@ -1807,6 +1873,7 @@ class TranslationTabPage(QWidget):
                 return
             self._set_feedback_message("")
             self.update_right_textEdit(text)
+            self._last_translate_key = src_key
             src_snap = source_snapshot
             fc_snap = fc
             tc_snap = tc
@@ -1848,7 +1915,18 @@ class TranslationTabPage(QWidget):
             return
         src_plain = self.left_textEdit.toPlainText() or ""
         t = self._postprocess_target_text(t, src_plain)
-        self.right_textEdit.setPlainText(t)
+        spans = list(getattr(self, "_pending_glossary_spans", []) or [])
+        self._pending_glossary_spans = []
+        try:
+            import terminology_bridge as tb
+
+            spans = tb.relocate_glossary_spans(t, spans)
+        except ImportError:
+            pass
+        if hasattr(self.right_textEdit, "set_glossary_translation"):
+            self.right_textEdit.set_glossary_translation(t, spans)
+        else:
+            self.right_textEdit.setPlainText(t)
         self._update_char_counts()
         self._maybe_show_uk_morph_install_notice()
 
@@ -1868,9 +1946,13 @@ class TranslationTabPage(QWidget):
         )
 
     def handle_worker_thread_finished(self) -> None:
+        sender = self.sender()
+        if sender is not None and sender is not self.worker_thread:
+            return
         self.worker_thread = None
         self._maybe_show_uk_morph_install_notice()
         if self._translate_reschedule:
+            self._stop_translate_debounce_timers()
             self._translate_reschedule = False
             QTimer.singleShot(80, self.translate)
             return

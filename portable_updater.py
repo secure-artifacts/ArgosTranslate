@@ -52,6 +52,8 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "translation_quality.py",
     "translation_tab_page.py",
     "translation_source_edit.py",
+    "glossary_alternatives.py",
+    "glossary_target_edit.py",
     "portable_paths.py",
     "win_path_utils.py",
     "network_policy.py",

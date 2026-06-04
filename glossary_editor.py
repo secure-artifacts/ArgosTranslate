@@ -9,8 +9,9 @@ import io
 import json
 import sys
 import threading
-from collections import Counter
+from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 
 _root = Path(__file__).resolve().parent
 if str(_root) not in sys.path:
@@ -281,6 +282,10 @@ class GlossaryEditorDialog(QDialog):
         if self._tgt_code() in ("ru", "uk"):
             text += (
                 "\n俄/乌语译文可填任意词形（不必原形）；保存时将自动识别各词格并规范为词典原形。"
+                "\n同一中文多种译法：可写多行（同一中文重复多行，每行一种外语），"
+                "或用 / 、; 分隔（如 牧师/神父）；"
+                "某译法下还有用词变体时用括号（如 священник (батько/батьки)）。"
+                "翻译时在全部译法中随机取一种；译文中相关词会高亮，鼠标悬停可改选。"
             )
         if self._tgt_code() == "uk":
             try:
@@ -371,6 +376,32 @@ class GlossaryEditorDialog(QDialog):
             msg += f"\n格式不完整行号: {preview}"
         QMessageBox.information(self, "批量添加", msg)
 
+    def _target_rows_for_entry(self, entry: Any, tgt_lang: str) -> list[str]:
+        """将一条术语展开为表格行（多行外语 / 单元格内多义）。"""
+        try:
+            import glossary_alternatives as ga
+        except ImportError:
+            ga = None
+        if not isinstance(entry, dict):
+            text = tb.target_cell_text(entry, tgt_lang)
+            return [text] if text else []
+        val = entry.get(tgt_lang)
+        if isinstance(val, list):
+            rows: list[str] = []
+            for item in val:
+                show = tb.target_cell_text({tgt_lang: item}, tgt_lang)
+                if show:
+                    rows.append(show)
+            return rows
+        text = tb.target_cell_text(entry, tgt_lang)
+        if not text:
+            return []
+        if ga is not None:
+            opts = ga.list_all_options(text)
+            if len(opts) > 1:
+                return opts
+        return [text]
+
     def reload_from_file(self) -> None:
         data = tb.load_glossary()
         tgt_lang = self._tgt_code()
@@ -379,14 +410,17 @@ class GlossaryEditorDialog(QDialog):
             for k in sorted(data.keys(), key=lambda s: (len(s), s), reverse=True)
             if isinstance(k, str) and k.strip()
         ]
-        n = len(keys) + 1
+        display_rows: list[tuple[str, str]] = []
+        for src in keys:
+            entry = data[src]
+            for tgt_show in self._target_rows_for_entry(entry, tgt_lang):
+                display_rows.append((src, tgt_show))
+        n = len(display_rows) + 1
         self.table.blockSignals(True)
         self.table.setUpdatesEnabled(False)
         try:
             self.table.setRowCount(n)
-            for row, src in enumerate(keys):
-                entry = data[src]
-                tgt_show = tb.target_cell_text(entry, tgt_lang)
+            for row, (src, tgt_show) in enumerate(display_rows):
                 self.table.setItem(row, 0, QTableWidgetItem(src))
                 self.table.setItem(row, 1, QTableWidgetItem(tgt_show))
             last = n - 1
@@ -402,14 +436,14 @@ class GlossaryEditorDialog(QDialog):
             QMessageBox.information(self, "删除", "请先选中要删除的行。")
             return
         tgt_lang = self._tgt_code()
-        to_remove: list[str] = []
+        to_remove: list[tuple[str, str]] = []
         for r in rows:
             it0 = self.table.item(r, 0)
             it1 = self.table.item(r, 1)
             src = (it0.text() if it0 else "").strip()
             tgt = (it1.text() if it1 else "").strip()
             if src and tgt:
-                to_remove.append(src)
+                to_remove.append((src, tgt))
         if not to_remove:
             for r in rows:
                 self.table.removeRow(r)
@@ -418,7 +452,7 @@ class GlossaryEditorDialog(QDialog):
             self,
             "删除选中",
             f"确定删除 {len(to_remove)} 条「{self._tgt_label()}」译文吗？\n"
-            "（源语词条与其它语言的译文会保留。）",
+            "（同中文多行时只删对应译法；其它语言保留。）",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -426,8 +460,8 @@ class GlossaryEditorDialog(QDialog):
             return
         try:
             gs = GlossaryStore().load()
-            for src in to_remove:
-                gs.remove_target(src, tgt_lang)
+            for src, tgt in to_remove:
+                gs.remove_target_variant(src, tgt_lang, tgt)
             gs.save()
         except OSError as e:
             QMessageBox.warning(self, "保存失败", str(e))
@@ -554,7 +588,8 @@ class GlossaryEditorDialog(QDialog):
         old_all = tb.load_glossary()
         tgt_lang = self._tgt_code()
         new_data: dict = {k: v for k, v in old_all.items() if isinstance(k, str)}
-        src_counts: Counter[str] = Counter()
+
+        src_tgts: OrderedDict[str, list[str]] = OrderedDict()
 
         for r in range(self.table.rowCount()):
             it0 = self.table.item(r, 0)
@@ -573,29 +608,31 @@ class GlossaryEditorDialog(QDialog):
                     else:
                         new_data.pop(src, None)
                 continue
-            src_counts[src] += 1
-            tgt_val = tb.parse_target_cell(tgt_raw, tgt_lang)
+            if src not in src_tgts:
+                src_tgts[src] = []
+            src_tgts[src].append(tgt_raw)
+
+        multi_row = 0
+        for src, tgts in src_tgts.items():
+            tgt_vals = [tb.parse_target_cell(t, tgt_lang) for t in tgts if t.strip()]
+            if not tgt_vals:
+                continue
             old = old_all.get(src)
             if isinstance(old, dict):
-                merged = {**old, tgt_lang: tgt_val}
+                merged = {**old}
             elif isinstance(old, str) and tgt_lang == "ru":
-                merged = {"ru": old, tgt_lang: tgt_val}
+                merged = {"ru": old}
             else:
-                merged = {tgt_lang: tgt_val}
+                merged = {}
+            if len(tgt_vals) == 1:
+                merged[tgt_lang] = tgt_vals[0]
+            else:
+                merged[tgt_lang] = tgt_vals
+                multi_row += 1
             if tgt_lang in ("ru", "uk"):
-                merged["pos"] = infer_pos_for_target(tgt_raw, tgt_lang)
+                merged["pos"] = infer_pos_for_target(tgts[0], tgt_lang)
             new_data[src] = merged
 
-        dup = sorted(z for z, c in src_counts.items() if c > 1)
-        if dup:
-            preview = "、".join(dup[:12])
-            if len(dup) > 12:
-                preview += "…"
-            QMessageBox.warning(
-                self,
-                "重复的源语",
-                f"以下源语出现多行，已按最后一行写入（共 {len(dup)} 个）：\n{preview}",
-            )
         try:
             tb.save_glossary(new_data)
         except OSError as e:
@@ -618,15 +655,18 @@ class GlossaryEditorDialog(QDialog):
                 pass
         if show_message:
             n_pair = sum(
-                1
+                len(self._target_rows_for_entry(e, tgt_lang))
                 for e in new_data.values()
-                if tb.target_cell_text(e, tgt_lang).strip()
             )
+            extra = ""
+            if multi_row:
+                extra = f"\n其中 {multi_row} 个中文有多行译法，已合并保存。"
             QMessageBox.information(
                 self,
                 "已保存",
                 f"已写入：\n{tb.glossary_path()}\n\n"
-                f"当前「{self._tgt_label()}」共 {n_pair} 条；文件总键数 {len(new_data)}。",
+                f"当前「{self._tgt_label()}」共 {n_pair} 条；文件总键数 {len(new_data)}。"
+                f"{extra}",
             )
         self.reload_from_file()
         return True

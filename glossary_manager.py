@@ -409,7 +409,20 @@ class GlossaryStore:
             return self
         prev = self._data.get(source)
         val = parse_target_cell(target, target_lang)
-        entry = _entry_merge_target(prev, target_lang, val)
+        entry = _normalize_entry(prev) if prev is not None else {}
+        prev_val = entry.get(target_lang)
+        if prev_val is None:
+            new_val: Any = val
+        elif isinstance(prev_val, list):
+            new_val = list(prev_val)
+            if val not in new_val:
+                new_val.append(val)
+        else:
+            if prev_val == val:
+                new_val = prev_val
+            else:
+                new_val = [prev_val, val]
+        entry[target_lang] = new_val
         if pos is not None and str(pos).strip() != "":
             entry["pos"] = _normalize_pos_import(str(pos))
         elif target_lang in ("ru", "uk"):
@@ -440,6 +453,48 @@ class GlossaryStore:
             self._data.pop(source, None)
         else:
             self._data[source] = entry
+        return self
+
+    def remove_target_variant(
+        self, source: str, target_lang: str, target_text: str
+    ) -> GlossaryStore:
+        """删除同键下某一译法（多行外语时只删对应行）。"""
+        from terminology_bridge import target_cell_text
+
+        source = (source or "").strip()
+        target_lang = (target_lang or "").strip().lower()
+        needle = (target_text or "").strip()
+        if not source or not target_lang or not needle:
+            return self
+        prev = self._data.get(source)
+        if not isinstance(prev, dict):
+            return self
+        val = prev.get(target_lang)
+        if isinstance(val, list):
+            kept: list[Any] = []
+            for item in val:
+                show = target_cell_text({target_lang: item}, target_lang)
+                if show.strip().casefold() != needle.casefold():
+                    kept.append(item)
+            entry = dict(prev)
+            if not kept:
+                entry.pop(target_lang, None)
+            elif len(kept) == 1:
+                entry[target_lang] = kept[0]
+            else:
+                entry[target_lang] = kept
+            if not any(
+                k not in ("pos", "grammemes", "gram")
+                and entry.get(k) not in (None, "")
+                for k in entry
+            ):
+                self._data.pop(source, None)
+            else:
+                self._data[source] = entry
+            return self
+        show = target_cell_text(prev, target_lang)
+        if show.strip().casefold() == needle.casefold():
+            return self.remove_target(source, target_lang)
         return self
 
     def clear_all(self) -> GlossaryStore:
