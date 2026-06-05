@@ -387,16 +387,24 @@ def mask_source_terms(
     used = 0
     for alias, key in _glossary_alias_matches(glossary):
         entry = glossary[key]
-        if ga is not None:
-            chosen_surface, alternatives, chosen_index = ga.pick_for_translation(
-                entry, to_code
-            )
-            repl = _lemma_for_chosen(chosen_surface, to_code) if chosen_surface else None
-        else:
-            repl = _resolve_target(entry, to_code)
-            alternatives = [repl] if repl else []
-            chosen_index = 0
-            chosen_surface = alternatives[0] if alternatives else ""
+        try:
+            if ga is not None:
+                chosen_surface, alternatives, chosen_index = ga.pick_for_translation(
+                    entry, to_code
+                )
+                repl = (
+                    _lemma_for_chosen(chosen_surface, to_code)
+                    if chosen_surface
+                    else None
+                )
+            else:
+                repl = _resolve_target(entry, to_code)
+                alternatives = [repl] if repl else []
+                chosen_index = 0
+                chosen_surface = alternatives[0] if alternatives else ""
+        except Exception:
+            # 跳过损坏术语条目，不影响其它术语与整句翻译。
+            continue
         if not repl:
             continue
         meta = gi.extract_term_meta(
@@ -720,15 +728,9 @@ def apply_glossary_with_spans(
     if not should_apply_glossary(from_code, to_code):
         return tr(text), []
     glossary = load_glossary()
-    try:
-        masked, slots = mask_source_terms(text, glossary, to_code)
-    except Exception:
-        return tr(text), []
+    masked, slots = mask_source_terms(text, glossary, to_code)
     if not slots:
         return tr(text), []
     raw = tr(masked)
-    try:
-        out, spans = restore_markers_with_spans(raw, slots, to_code=to_code)
-    except Exception:
-        return raw, []
+    out, spans = restore_markers_with_spans(raw, slots, to_code=to_code)
     return out, spans
