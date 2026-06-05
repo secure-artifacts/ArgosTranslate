@@ -1,12 +1,7 @@
 """
-术语库目标语单元格：解析 /、; 与括号 () 中的多义选项；
-同一中文多行外语条目合并后同样视为多义。
-
-规则：
-- 顶层用 / 或 ; 分隔多种译法（任选其一）；
-- 某段末尾可带 (a/b) 表示该译法下的词形/用词变体；
-- 同时出现时：先按 / 或 ; 拆成主选项，再展开括号内变体；
-- 翻译时在全部选项中随机择一（用户可在译文区悬停改选）。
+术语库解析：
+- 源语（中文）/ ; 分隔 → 多种中文说法对应同一外语（翻译时任一侧均匹配）；
+- 目标语单元格 / ; 换行 与括号 () → 多种外语译法（翻译时随机择一，可悬停改选）。
 """
 from __future__ import annotations
 
@@ -14,12 +9,13 @@ import random
 import re
 from typing import Any, Iterable
 
-_TOP_SEP = frozenset({"/", ";", "；"})
+_TOP_SEP = frozenset({"/", ";", "；", "\n"})
+_SOURCE_ALIAS_SEP = frozenset({"/", ";", "；"})
 _PAREN_SUFFIX = re.compile(r"^(.*?)\(([^()]+)\)\s*$")
 
 
-def split_top_level(text: str) -> list[str]:
-    """按 / ; 拆分，忽略括号内的分隔符。"""
+def _split_at_seps(text: str, seps: frozenset[str]) -> list[str]:
+    """按给定分隔符拆分，忽略括号内的分隔符。"""
     t = (text or "").strip()
     if not t:
         return []
@@ -33,7 +29,7 @@ def split_top_level(text: str) -> list[str]:
         elif ch == ")":
             depth = max(0, depth - 1)
             buf.append(ch)
-        elif ch in _TOP_SEP and depth == 0:
+        elif ch in seps and depth == 0:
             seg = "".join(buf).strip()
             if seg:
                 parts.append(seg)
@@ -44,6 +40,28 @@ def split_top_level(text: str) -> list[str]:
     if tail:
         parts.append(tail)
     return parts if parts else [t]
+
+
+def split_top_level(text: str) -> list[str]:
+    """目标语：按 / ; 换行拆分，忽略括号内的分隔符。"""
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    return _split_at_seps(text, _TOP_SEP)
+
+
+def split_source_aliases(text: str) -> list[str]:
+    """源语（中文）多别名：/ 或 ; 分隔，共用同一外语译法。"""
+    return _split_at_seps(text, _SOURCE_ALIAS_SEP)
+
+
+def list_source_aliases(source_key: str) -> list[str]:
+    """术语库 JSON 键中的全部可匹配中文片段（去重、保序）。"""
+    key = (source_key or "").strip()
+    if not key:
+        return []
+    parts = split_source_aliases(key)
+    if len(parts) <= 1:
+        return [key]
+    return _dedupe_options(parts)
 
 
 def expand_segment(segment: str) -> list[str]:
@@ -67,7 +85,7 @@ def expand_segment(segment: str) -> list[str]:
 
 def list_all_options(raw: str) -> list[str]:
     """术语库一行内的全部可选译法（去重、保序）。"""
-    text = (raw or "").strip()
+    text = (raw or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not text:
         return []
     if not any(c in text for c in _TOP_SEP) and "(" not in text:

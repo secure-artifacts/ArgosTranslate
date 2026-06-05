@@ -360,19 +360,32 @@ def _glossary_surface_marker(used: int) -> tuple[str, str]:
     return _to_fullwidth_latin_digits(ascii_m), ascii_m
 
 
+def _glossary_alias_matches(glossary: dict[str, Any]) -> list[tuple[str, str]]:
+    """(可匹配源语片段, 术语库存储键)，按片段长度降序。"""
+    pairs: list[tuple[str, str]] = []
+    for key in glossary.keys():
+        if not isinstance(key, str) or not key.strip():
+            continue
+        storage_key = key.strip()
+        if ga is not None:
+            aliases = ga.list_source_aliases(storage_key)
+        else:
+            aliases = [storage_key]
+        for alias in aliases:
+            if alias:
+                pairs.append((alias, storage_key))
+    pairs.sort(key=lambda p: len(p[0]), reverse=True)
+    return pairs
+
+
 def mask_source_terms(
     text: str, glossary: dict[str, Any], to_code: str
 ) -> tuple[str, list[dict[str, Any]]]:
     to_code = (to_code or "").strip().lower()
-    keys = sorted(
-        (k for k in glossary.keys() if isinstance(k, str) and k.strip()),
-        key=len,
-        reverse=True,
-    )
     slots: list[dict[str, Any]] = []
     out = text
     used = 0
-    for key in keys:
+    for alias, key in _glossary_alias_matches(glossary):
         entry = glossary[key]
         if ga is not None:
             chosen_surface, alternatives, chosen_index = ga.pick_for_translation(
@@ -394,10 +407,10 @@ def mask_source_terms(
         raw_cell = _raw_target_string(entry, to_code) or repl
         if ga is not None and not alternatives:
             alternatives = ga.list_options_from_entry(entry, to_code) or [repl]
-        while key in out:
+        while alias in out:
             surface, ascii_m = _glossary_surface_marker(used)
             used += 1
-            out = out.replace(key, surface, 1)
+            out = out.replace(alias, surface, 1)
             slots.append(
                 {
                     "marker": surface,
@@ -408,6 +421,7 @@ def mask_source_terms(
                     "words": meta.get("words") or [],
                     "replacement": repl,
                     "zh_source": key,
+                    "zh_matched": alias,
                     "raw_cell": raw_cell,
                     "alternatives": alternatives,
                     "chosen_index": chosen_index,
@@ -551,7 +565,8 @@ def restore_markers_with_spans(
     # 容错：G L O S S A 0001、glossa0001、零宽空白等（半角）
     _gap = r"[\s\u200b-\u200d\ufeff\u00a0]*"
     flex_hw = re.compile(
-        rf"(?i)G{_gap}L{_gap}O{_gap}S{_gap}S{_gap}A{_gap}(\d{{3,4}})(?!\d)"
+        rf"G{_gap}L{_gap}O{_gap}S{_gap}S{_gap}A{_gap}(\d{{3,4}})(?!\d)",
+        re.IGNORECASE,
     )
 
     def _flex_repl_hw(mm: re.Match[str]) -> str:
@@ -705,9 +720,15 @@ def apply_glossary_with_spans(
     if not should_apply_glossary(from_code, to_code):
         return tr(text), []
     glossary = load_glossary()
-    masked, slots = mask_source_terms(text, glossary, to_code)
+    try:
+        masked, slots = mask_source_terms(text, glossary, to_code)
+    except Exception:
+        return tr(text), []
     if not slots:
         return tr(text), []
     raw = tr(masked)
-    out, spans = restore_markers_with_spans(raw, slots, to_code=to_code)
+    try:
+        out, spans = restore_markers_with_spans(raw, slots, to_code=to_code)
+    except Exception:
+        return raw, []
     return out, spans

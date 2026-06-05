@@ -1,5 +1,5 @@
-"""
-本地翻译器（俄乌）— 版本号（发布前在此修改，再运行 tools/build_update_package.py 打更新包）。
+﻿"""
+æœ¬åœ°ç¿»è¯‘å™¨ï¼ˆä¿„ä¹Œï¼‰â€” ç‰ˆæœ¬å·ï¼ˆå‘å¸ƒå‰åœ¨æ­¤ä¿®æ”¹ï¼Œå†è¿è¡Œ tools/build_update_package.py æ‰“æ›´æ–°åŒ…ï¼‰ã€‚
 """
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-APP_NAME = "本地翻译器（俄乌）"
-APP_VERSION = "1.4.44"
+APP_NAME = "æœ¬åœ°ç¿»è¯‘å™¨ï¼ˆä¿„ä¹Œï¼‰"
+APP_VERSION = "1.4.45"
 APP_BUILD = "20260605"
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
@@ -23,7 +23,7 @@ def version_tuple(version: str) -> tuple[int, int, int]:
 
 
 def compare_versions(a: str, b: str) -> int:
-    """a > b 返回正数，相等返回 0。"""
+    """a > b è¿”å›žæ­£æ•°ï¼Œç›¸ç­‰è¿”å›ž 0ã€‚"""
     ta, tb = version_tuple(a), version_tuple(b)
     if ta > tb:
         return 1
