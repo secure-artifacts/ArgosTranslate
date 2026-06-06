@@ -62,7 +62,10 @@ def main() -> int:
             pass
 
     save_install_pointer(root)
-    return launch_app(root)
+    if launch_app(root):
+        return 0
+    notify_launch_failed(root)
+    return 1
 
 
 if __name__ == "__main__":

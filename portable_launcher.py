@@ -117,6 +117,9 @@ def _bootstrap_for_gui(root: Path) -> None:
         from portable_installer import ensure_runtime_python_deps
 
         ensure_runtime_python_deps(root)
+        from portable_installer import ensure_morph_python_deps
+
+        ensure_morph_python_deps(root)
         from portable_installer import apply_gui_patch_to_venv
 
         apply_gui_patch_to_venv(root)

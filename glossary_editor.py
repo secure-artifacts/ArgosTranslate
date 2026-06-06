@@ -22,7 +22,7 @@ from glossary_manager import GlossaryStore, infer_pos_for_target
 from glossary_cell_sanitize import parse_clipboard_table, sanitize_glossary_cell
 
 from PyQt5.QtCore import Qt, QEvent, QTimer
-from PyQt5.QtGui import QKeySequence
+from PyQt5.QtGui import QKeySequence, QShowEvent
 from PyQt5.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
@@ -974,6 +974,7 @@ class GlossaryEditorDialog(QDialog):
         sc_save.activated.connect(self.save_to_file)
 
         self._updating_pos = False
+        self._morph_pos_refresh_token = 0
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         self.table.cellClicked.connect(self._on_table_cell_clicked)
@@ -1073,14 +1074,64 @@ class GlossaryEditorDialog(QDialog):
 
                 if not gi.uk_morph_analyzer_available():
                     text += (
-                        "\n\n乌克兰语自动变格需安装 pymorphy2-dicts-uk。"
+                        "\n\n乌克兰语自动变格需安装 pymorphy3-dicts-uk。"
                         "在程序目录终端运行：\n"
                         f"{gi.uk_morph_install_command()}\n"
                         "安装后请重启程序。"
                     )
             except ImportError:
                 pass
+        elif self._tgt_code() == "ru":
+            try:
+                import glossary_manager as gm
+                import pymorphy_compat as pc
+
+                if not gm.morph_analyzer_available():
+                    text += (
+                        "\n\n逐词词性识别需要形态分析组件（pymorphy3）。"
+                        "若「逐词词性」列只有整词括号、没有格/数，请在程序目录终端运行：\n"
+                        f"{pc.install_command()}\n"
+                        "安装后请重启程序。"
+                    )
+            except ImportError:
+                pass
         self.hint.setText(text)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._pos_column_count() >= 4:
+            self._schedule_morph_pos_refresh()
+
+    def _schedule_morph_pos_refresh(self, attempt: int = 0) -> None:
+        """pymorphy 后台加载完成后刷新逐词词性列。"""
+        if self._pos_column_count() < 4:
+            return
+        token = self._morph_pos_refresh_token
+        try:
+            import glossary_manager as gm
+
+            morph = gm.shared_morph_analyzer()
+        except Exception:
+            morph = None
+        if morph is not None:
+            self._refresh_all_pos_columns()
+            return
+        if attempt >= 40:
+            return
+
+        def _retry(t: int = token, a: int = attempt + 1) -> None:
+            if t != self._morph_pos_refresh_token:
+                return
+            self._schedule_morph_pos_refresh(a)
+
+        QTimer.singleShot(500, _retry)
+
+    def _refresh_all_pos_columns(self) -> None:
+        if self._pos_column_count() < 4:
+            return
+        for row in range(self.table.rowCount()):
+            if self.table._cell_text(row, 1).strip():
+                self._refresh_row_pos_columns(row)
 
     def _on_lang_pair_changed(self) -> None:
         save_lang_pair_prefs(self._src_code(), self._tgt_code())
@@ -1540,6 +1591,7 @@ class GlossaryEditorDialog(QDialog):
         )
 
     def reload_from_file(self, *, defer_morph: bool = False) -> None:
+        self._morph_pos_refresh_token += 1
         data = tb.load_glossary()
         tgt_lang = self._tgt_code()
         cols = self._pos_column_count()
@@ -1587,6 +1639,8 @@ class GlossaryEditorDialog(QDialog):
             self.table.blockSignals(False)
             self._updating_pos = False
         self.table._resize_rows_for_contents()
+        if cols >= 4 and (defer_morph or self.isVisible()):
+            self._schedule_morph_pos_refresh()
 
     def delete_selected_rows(self) -> None:
         rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)

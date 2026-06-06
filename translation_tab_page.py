@@ -283,7 +283,7 @@ class TranslationTabPage(QWidget):
 
         self._chk_segmented = QCheckBox("分句稿件")
         self._chk_segmented.setToolTip(
-            "每行原文与译文对齐；在原文框按 Enter 换到下一句，"
+            "每行原文与译文对齐；在原文框按 Enter 进入下一句（下一行已空则直接跳转）；"
             "每行右侧可「采纳为 TM」"
         )
         self._chk_segmented.toggled.connect(self._toggle_segmented_mode)
@@ -896,8 +896,7 @@ class TranslationTabPage(QWidget):
                 if tm_hit is not None:
                     tm.append_hit_log(tm_hit, query=input_text_raw)
                     self._target_postprocess_done = True
-                    self._pending_glossary_spans = []
-                    return self._finalize_zh_slavic_output(
+                    out = self._finalize_zh_slavic_output(
                         tm_hit.target_text,
                         source_snapshot,
                         fc,
@@ -906,6 +905,20 @@ class TranslationTabPage(QWidget):
                         tb=tb,
                         translation=translation,
                     )
+                    self._pending_glossary_spans = []
+                    if use_glossary and tb is not None and hasattr(
+                        tb, "find_glossary_spans_in_target"
+                    ):
+                        try:
+                            if tb.should_apply_glossary(fc, tc):
+                                self._pending_glossary_spans = (
+                                    tb.find_glossary_spans_in_target(
+                                        source_snapshot, out, fc, tc
+                                    )
+                                )
+                        except Exception:
+                            pass
+                    return out
             except ImportError:
                 pass
 
@@ -1266,22 +1279,39 @@ class TranslationTabPage(QWidget):
         fc = (getattr(L, "code", None) or "").strip().lower() if L else ""
         tc = (getattr(R, "code", None) or "").strip().lower() if R else ""
         tb = _get_terminology_bridge()
-        supported = bool(
+        toggle_ok = bool(
             fc
             and tc
             and tb is not None
+            and hasattr(tb, "glossary_toggle_supported")
+            and tb.glossary_toggle_supported(fc, tc)
+        )
+        has_entries = bool(
+            toggle_ok
             and hasattr(tb, "should_apply_glossary")
             and tb.should_apply_glossary(fc, tc)
         )
-        self._chk_use_glossary.setEnabled(supported)
-        if supported:
+        self._chk_use_glossary.setEnabled(toggle_ok)
+        if not toggle_ok:
+            if tb is None:
+                tip = "术语库组件未加载（请检查安装目录是否完整）"
+            elif fc and tc and not (
+                hasattr(tb, "glossary_toggle_supported")
+                and tb.glossary_toggle_supported(fc, tc)
+            ):
+                tip = "术语库仅在源语言为中文（简体/繁体）时可用"
+            else:
+                tip = "请先选择源语言与目标语言"
+            self._chk_use_glossary.setToolTip(tip)
+        elif has_entries:
             self._chk_use_glossary.setToolTip(
                 "翻译时应用术语库中的指定译法；"
                 "关闭后按模型自由翻译（不强制术语）"
             )
         else:
             self._chk_use_glossary.setToolTip(
-                "当前语言对无可用术语译文，或未配置术语库"
+                "当前目标语尚无术语条目（勾选后不会替换用词）。"
+                "关闭后按模型自由翻译；可在顶部「术语库」中添加词条。"
             )
 
     def _resolve_use_glossary(
@@ -1292,7 +1322,13 @@ class TranslationTabPage(QWidget):
     ) -> bool:
         if not self._chk_use_glossary.isChecked():
             return False
-        if tb is None or not hasattr(tb, "should_apply_glossary"):
+        if tb is None:
+            return False
+        if hasattr(tb, "glossary_toggle_supported") and not tb.glossary_toggle_supported(
+            from_code, to_code
+        ):
+            return False
+        if not hasattr(tb, "should_apply_glossary"):
             return False
         return bool(tb.should_apply_glossary(from_code, to_code))
 
@@ -2017,11 +2053,16 @@ class TranslationTabPage(QWidget):
             spans = list(getattr(tab, "_pending_glossary_spans", []) or [])
             tab._pending_glossary_spans = []
             t = out
-            if use_glossary and spans:
+            if use_glossary:
                 try:
                     import terminology_bridge as tb_mod
 
-                    spans = tb_mod.relocate_glossary_spans(t, spans)
+                    if spans:
+                        spans = tb_mod.relocate_glossary_spans(t, spans)
+                    elif hasattr(tb_mod, "find_glossary_spans_in_target"):
+                        spans = tb_mod.find_glossary_spans_in_target(
+                            raw_line, t, fc, tc
+                        )
                 except ImportError:
                     pass
             return t, spans

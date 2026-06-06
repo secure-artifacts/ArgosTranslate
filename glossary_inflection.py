@@ -73,16 +73,23 @@ def uk_morph_analyzer_available() -> bool:
 
 def uk_morph_install_command() -> str:
     """供用户复制执行的 pip 命令（使用当前解释器）。"""
-    import sys
+    import pymorphy_compat as pc
 
-    return f'"{sys.executable}" -m pip install pymorphy2-dicts-uk'
+    return pc.install_command(lang="uk")
 
 
 def uk_morph_install_message() -> str:
     """乌克兰语变格词典缺失时的说明（中文）。"""
     cmd = uk_morph_install_command()
+    pkg = "pymorphy3-dicts-uk"
+    try:
+        import pymorphy_compat as pc
+
+        pkg = pc.dicts_package("uk")
+    except Exception:
+        pass
     return (
-        "乌克兰语术语自动变格需要额外安装词典包 pymorphy2-dicts-uk。\n\n"
+        f"乌克兰语术语自动变格需要额外安装词典包 {pkg}。\n\n"
         "未安装时，术语库中的乌语词条将以原形插入，格变化可能不正确。\n\n"
         "请在程序目录打开终端（与 run_gui.bat 同级），运行：\n\n"
         f"{cmd}\n\n"
@@ -125,10 +132,9 @@ def _shared_uk_morph_analyzer() -> Any | None:
     if _uk_morph_singleton is not False:
         return _uk_morph_singleton
     try:
-        from pymorphy2 import MorphAnalyzer
+        import pymorphy_compat as pc
 
-        _uk_morph_singleton = MorphAnalyzer(lang="uk")
-        _uk_morph_singleton.parse("тест")
+        _uk_morph_singleton = pc.create_morph_analyzer("uk")
     except Exception:
         _uk_morph_singleton = None
     return _uk_morph_singleton

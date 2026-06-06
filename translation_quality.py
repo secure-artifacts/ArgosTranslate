@@ -617,11 +617,14 @@ def _apply_zh_shi_me_definitional_fix(
     if not source_zh.strip() or not target:
         return target
 
+    # 内联 (?i) 必须位于 pattern 开头；``^(?i)…`` 在 Python 3.11+ 会报错。
     _RU_KAKOV = re.compile(
-        r"^(?i)(Какова|Каков|Каково|Каковы)\s+(.{1,150}?)\s*[？?]?\s*$"
+        r"^(Какова|Каков|Каково|Каковы)\s+(.{1,150}?)\s*[？?]?\s*$",
+        re.IGNORECASE,
     )
     _UK_YAK = re.compile(
-        r"^(?i)(Яка|Який|Яке|Які)\s+(.{1,150}?)\s*[？?]?\s*$"
+        r"^(Яка|Який|Яке|Які)\s+(.{1,150}?)\s*[？?]?\s*$",
+        re.IGNORECASE,
     )
     _SRC_SHI_ME = re.compile(r"^什么是\s*(.{1,80}?)\s*[？?]\s*$")
 

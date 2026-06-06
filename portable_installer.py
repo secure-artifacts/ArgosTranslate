@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -89,9 +90,9 @@ _PIP_INSTALL_STAGES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "形态分析组件",
         (
-            "pymorphy2>=0.9.0",
-            "pymorphy2-dicts-ru>=2.4.0",
-            "pymorphy2-dicts-uk>=2.4.0",
+            "pymorphy3>=2.0.6",
+            "pymorphy3-dicts-ru>=2.4.0",
+            "pymorphy3-dicts-uk>=2.4.0",
         ),
     ),
     ("CTranslate2 核心", ("ctranslate2>=4.0,<5",)),
@@ -875,7 +876,7 @@ def _pip_install(py: Path, install_root: Path, cb: ProgressCb | None) -> None:
     stage_idle_hints = {
         "PyQt5 界面库": "正在解压 PyQt5（体积较大，可能数分钟无新输出）",
         "词典与常用组件": "正在安装查词 / 术语常用组件（beautifulsoup4、requests 等）",
-        "形态分析组件": "正在安装 pymorphy2 词典",
+        "形态分析组件": "正在安装 pymorphy3 词典",
         "CTranslate2 核心": "正在解压 CTranslate2（约 1～3 分钟无新输出属正常）",
         "Argos 翻译组件": "正在安装 Argos / Stanza / PyTorch（解压最慢，请耐心等待）",
     }
@@ -1074,6 +1075,24 @@ def ensure_runtime_python_deps(install_root: Path) -> None:
     _pip_install_missing(py, install_root, tuple(need))
 
 
+def ensure_morph_python_deps(install_root: Path) -> None:
+    """嵌入 Python 3.12 无法使用原版 pymorphy2；启动时为旧安装补装 pymorphy3。"""
+    py = install_root / "venv" / "Scripts" / "python.exe"
+    if not py.is_file():
+        return
+    if _python_can_import(py, "pymorphy3", cwd=install_root):
+        return
+    _pip_install_missing(
+        py,
+        install_root,
+        (
+            "pymorphy3>=2.0.6",
+            "pymorphy3-dicts-ru>=2.4.0",
+            "pymorphy3-dicts-uk>=2.4.0",
+        ),
+    )
+
+
 def ensure_lookup_python_deps(install_root: Path) -> None:
     """兼容旧名。"""
     ensure_runtime_python_deps(install_root)
@@ -1244,29 +1263,101 @@ def install_to(install_root: Path, cb: ProgressCb | None = None) -> Path:
         ) from e
 
 
-def launch_app(install_root: Path) -> int:
+def _launch_app_impl(install_root: Path) -> bool:
+    """启动已安装的 GUI（优先 os.startfile，避免安装 exe 退出时带走子进程）。"""
+    install_root = install_root.resolve()
     configure_windows_utf8()
+    for rel in ("run_gui.bat", "本地翻译器.bat", "本地翻译器.exe"):
+        cand = install_root / rel
+        if cand.is_file():
+            try:
+                os.startfile(str(cand))
+                return True
+            except OSError:
+                pass
     pyw = install_root / "venv" / "Scripts" / "pythonw.exe"
     script = install_root / "portable_launcher.py"
+    if not pyw.is_file() or not script.is_file():
+        return False
     env = _subprocess_env()
     env["XDG_DATA_HOME"] = str(install_root / "data" / "local")
     env["XDG_CONFIG_HOME"] = str(install_root / "data" / "config")
     env["XDG_CACHE_HOME"] = str(install_root / "data" / "cache")
-    env["ARGOS_TRANSLATE_HOME"] = str(install_root.resolve())
+    env["ARGOS_TRANSLATE_HOME"] = str(install_root)
     try:
         from native_dll_bootstrap import runtime_env_for_root
 
         env.update(runtime_env_for_root(install_root))
     except ImportError:
         pass
-    subprocess.Popen(
-        [str(pyw), str(script)],
-        cwd=str(install_root),
-        env=env,
-        close_fds=True,
-        **subprocess_hide_window_kwargs(detached=True),
+    try:
+        popen_kw: dict = {
+            "args": [str(pyw), str(script)],
+            "cwd": str(install_root),
+            "env": env,
+            "close_fds": True,
+        }
+        if sys.platform == "win32":
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0x00000001)
+            si.wShowWindow = 0
+            popen_kw["creationflags"] = flags
+            popen_kw["startupinfo"] = si
+        subprocess.Popen(**popen_kw)
+        return True
+    except OSError:
+        return False
+
+
+def _launch_app_worker(install_root: Path, delay_sec: float) -> None:
+    if delay_sec > 0:
+        time.sleep(delay_sec)
+    if not _launch_app_impl(install_root):
+        log_dir = install_root / "data" / "logs"
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            (log_dir / "launch_errors.log").write_text(
+                "安装/更新完成后自动启动失败。"
+                "请手动运行 run_gui.bat 或桌面快捷方式。\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+
+def launch_app(install_root: Path) -> bool:
+    """
+    安装/更新完成后启动主程序。
+    从 PyInstaller 安装 exe 调用时延迟启动，避免父进程退出带走子进程。
+    """
+    install_root = install_root.resolve()
+    delay = 1.0 if getattr(sys, "frozen", False) else 0.0
+    if delay > 0:
+        threading.Thread(
+            target=_launch_app_worker,
+            args=(install_root, delay),
+            name="post-install-launch",
+            daemon=False,
+        ).start()
+        return True
+    return _launch_app_impl(install_root)
+
+
+def notify_launch_failed(install_root: Path) -> None:
+    bat = install_root / "run_gui.bat"
+    msg = (
+        "安装已完成，但未能自动打开软件。\n\n"
+        f"请手动双击运行：\n{bat}\n\n"
+        "或从开始菜单 / 桌面快捷方式打开「本地翻译器」。"
     )
-    return 0
+    if getattr(sys, "frozen", False) and sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(0, msg, "本地翻译器", 0x30)
+    else:
+        print(msg, file=sys.stderr)
 
 
 def ensure_installed(

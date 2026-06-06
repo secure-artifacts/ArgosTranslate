@@ -106,13 +106,9 @@ def _shared_morph_analyzer() -> Any | None:
         if _morph_singleton is not False:
             return _morph_singleton
         try:
-            from pymorphy2 import MorphAnalyzer
+            import pymorphy_compat as pc
 
-            morph = MorphAnalyzer()
-            try:
-                morph.parse("тест")
-            except Exception:
-                pass
+            morph = pc.create_morph_analyzer()
             _morph_singleton = morph
         except Exception:
             _morph_singleton = None
@@ -122,6 +118,11 @@ def _shared_morph_analyzer() -> Any | None:
 def shared_morph_analyzer() -> Any | None:
     """供查词、维基、术语桥等共用的 MorphAnalyzer 单例（避免重复初始化）。"""
     return _shared_morph_analyzer()
+
+
+def morph_analyzer_available() -> bool:
+    """俄语形态分析器是否可用（pymorphy3 / pymorphy2）。"""
+    return shared_morph_analyzer() is not None
 
 
 def _plain_ru_surface(surface: str) -> str:

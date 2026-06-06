@@ -226,8 +226,8 @@ class SegmentedManuscriptPanel(QWidget):
         self._pending_targets: list[str] = []
 
         hint = QLabel(
-            "每行一句：在原文框输入或粘贴，按 Enter 换到下一句；"
-            "可编辑译文后「采纳为 TM」，不需要的行点「删除」。"
+            "每行一句：在原文框输入或粘贴，按 Enter 进入下一句（下一行已空则直接跳转，"
+            "不会多插空白行）；可编辑译文后「采纳为 TM」，不需要的行点「删除」。"
         )
         hint.setObjectName("HintLabel")
         hint.setWordWrap(True)
@@ -347,12 +347,28 @@ class SegmentedManuscriptPanel(QWidget):
         for row in self._rows:
             row._schedule_sync_row_heights()
 
+    def _row_is_blank(self, index: int, sources: list[str], targets: list[str]) -> bool:
+        if not (0 <= index < len(sources)):
+            return False
+        return not (sources[index] or "").strip()
+
     def _insert_row_after(self, index: int) -> None:
         if self._block_sync:
             return
-        pos = max(0, min(index, len(self._rows) - 1)) + 1
+        if not self._rows:
+            return
+        index = max(0, min(index, len(self._rows) - 1))
         sources = self.get_source_lines()
         targets = self.get_target_lines()
+
+        # 下一行原文仍空：直接聚焦，避免 Enter 后多出一行空白占位
+        if index + 1 < len(sources) and self._row_is_blank(
+            index + 1, sources, targets
+        ):
+            self._rows[index + 1].focus_source()
+            return
+
+        pos = index + 1
         sources.insert(pos, "")
         targets.insert(pos, "")
         self._block_sync = True

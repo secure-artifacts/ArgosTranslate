@@ -423,20 +423,20 @@ class InstallWizard:
         def work() -> None:
             try:
                 root = install_to(path, self._thread_progress)
-                self._result = root
-                self.root.after(
-                    0,
-                    lambda: self._apply_progress(
+                def _finish() -> None:
+                    self._apply_progress(
                         InstallProgress(4, "完成", 1.0, "安装成功")
-                    ),
-                )
-                self.root.after(
-                    0,
-                    lambda: messagebox.showinfo(
-                        "安装完成", f"已安装到：\n{root}\n\n即将启动软件。"
-                    ),
-                )
-                self.root.after(0, self.root.destroy)
+                    )
+                    messagebox.showinfo(
+                        "安装完成",
+                        f"已安装到：\n{root}\n\n"
+                        "点击「确定」后软件将自动打开。\n"
+                        "若未见窗口，请查看任务栏或从开始菜单重新打开。",
+                    )
+                    self.root.destroy()
+
+                self._result = root
+                self.root.after(0, _finish)
             except Exception as e:
                 self.root.after(
                     0,

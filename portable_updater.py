@@ -43,6 +43,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "slavic_pro_register.py",
     "data/idioms",
     "glossary_manager.py",
+    "pymorphy_compat.py",
     "goroh_parser.py",
     "inflection_display.py",
     "lookup_icon_data.py",
@@ -377,10 +378,19 @@ def apply_update(
 
 
 def launch_gui(target_root: Path) -> bool:
+    try:
+        from portable_installer import launch_app
+
+        return launch_app(target_root.resolve())
+    except ImportError:
+        pass
     bat = target_root / "run_gui.bat"
     if bat.is_file():
-        os.startfile(str(bat))
-        return True
+        try:
+            os.startfile(str(bat))
+            return True
+        except OSError:
+            pass
     pyw = target_root / "venv" / "Scripts" / "pythonw.exe"
     script = target_root / "portable_launcher.py"
     if pyw.is_file() and script.is_file():
@@ -399,14 +409,17 @@ def launch_gui(target_root: Path) -> bool:
             env.update(runtime_env_for_root(target_root))
         except ImportError:
             pass
-        subprocess.Popen(
-            [str(pyw), str(script)],
-            cwd=str(target_root),
-            env=env,
-            close_fds=True,
-            **subprocess_hide_window_kwargs(detached=True),
-        )
-        return True
+        try:
+            subprocess.Popen(
+                [str(pyw), str(script)],
+                cwd=str(target_root),
+                env=env,
+                close_fds=True,
+                **subprocess_hide_window_kwargs(detached=True),
+            )
+            return True
+        except OSError:
+            return False
     return False
 
 
@@ -417,8 +430,7 @@ def restart_application(target_root: Path) -> bool:
         from portable_installer import launch_app
 
         if (target_root / "venv" / "Scripts" / "pythonw.exe").is_file():
-            launch_app(target_root)
-            return True
+            return launch_app(target_root)
     except ImportError:
         pass
     return launch_gui(target_root)

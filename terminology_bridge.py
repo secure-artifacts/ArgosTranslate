@@ -192,6 +192,8 @@ def _entry_has_target(entry: Any, to_code: str) -> bool:
 
 def should_apply_glossary(from_code: str, to_code: str) -> bool:
     """当前语言对是否存在可用的术语译文（源文键由用户在术语表中按源语填写）。"""
+    if not is_chinese_source_language(from_code):
+        return False
     glossary = load_glossary()
     if not glossary:
         return False
@@ -202,6 +204,13 @@ def should_apply_glossary(from_code: str, to_code: str) -> bool:
         if _entry_has_target(entry, to_code):
             return True
     return False
+
+
+def glossary_toggle_supported(from_code: str, to_code: str) -> bool:
+    """界面是否允许用户勾选/取消「术语库」（不要求术语表已有条目）。"""
+    if not is_chinese_source_language(from_code):
+        return False
+    return bool((to_code or "").strip())
 
 
 _LANG_LABEL_ZH: dict[str, str] = {
@@ -903,6 +912,77 @@ def translate_with_glossary_slots(
     )
 
 
+def _cyrillic_stem_prefix(word: str, *, min_len: int = 5) -> str:
+    parts = _CYR_WORD_RE.findall((word or "").casefold())
+    if not parts:
+        return ""
+    core = parts[0]
+    if len(core) <= min_len:
+        return core
+    return core[: max(min_len, len(core) - 2)]
+
+
+def _alt_pos_guess(alt: str) -> str:
+    a = (alt or "").strip().casefold()
+    if not a:
+        return "other"
+    if a.endswith(
+        ("ировать", "ить", "ать", "еть", "уть", "ыть", "ти", "чь", "ться", "ить")
+    ):
+        return "verb"
+    return "noun"
+
+
+def _token_matches_glossary_alternative(
+    token: str,
+    alt: str,
+    code: str,
+    ctx_before: str,
+    ctx_after: str,
+    *,
+    pos_hint: str | None = None,
+    word_meta: list | None = None,
+) -> bool:
+    tok = (token or "").strip()
+    base = (alt or "").strip()
+    if not tok or not base:
+        return False
+    if tok.casefold() == base.casefold():
+        return True
+    try:
+        import glossary_alternatives as ga
+
+        inf = ga.inflect_option(
+            base,
+            code,
+            ctx_before,
+            ctx_after,
+            pos_hint=pos_hint,
+            words=word_meta if word_meta else None,
+        )
+        if tok.casefold() == (inf or "").strip().casefold():
+            return True
+    except Exception:
+        pass
+    try:
+        import glossary_inflection as gi
+
+        morph = gi._morph_for_lang(code)
+        if morph is not None:
+            tw = gi.analyze_slavic_word(tok, morph, pos_hint=pos_hint)
+            aw = gi.analyze_slavic_word(base, morph, pos_hint=pos_hint)
+            tl = (tw.get("lemma") or "").casefold()
+            al = (aw.get("lemma") or "").casefold()
+            if tl and al and tl == al:
+                return True
+    except Exception:
+        pass
+    stem = _cyrillic_stem_prefix(base)
+    if len(stem) >= 5 and stem in tok.casefold():
+        return True
+    return False
+
+
 def _infer_chosen_index_for_surface(
     surface: str,
     alternatives: list[str],
@@ -911,33 +991,59 @@ def _infer_chosen_index_for_surface(
     context_after: str = "",
     to_code: str = "",
     pos_hint: str | None = None,
+    word_meta: list | None = None,
 ) -> int:
     """按译文中实际词形推断当前选中的备选下标。"""
     surf = (surface or "").strip()
     if not surf:
         return 0
-    surf_cf = surf.casefold()
-    for i, alt in enumerate(alternatives):
-        if (alt or "").strip().casefold() == surf_cf:
-            return i
     code = (to_code or "").strip().lower()
-    if code in ("ru", "uk"):
-        try:
-            import glossary_alternatives as ga
+    matches: list[int] = []
+    for i, alt in enumerate(alternatives):
+        if _token_matches_glossary_alternative(
+            surf,
+            alt,
+            code,
+            context_before,
+            context_after,
+            pos_hint=pos_hint,
+            word_meta=word_meta,
+        ):
+            matches.append(i)
+    if not matches:
+        return 0
+    if len(matches) == 1:
+        return matches[0]
+    try:
+        import glossary_alternatives as ga
 
-            for i, alt in enumerate(alternatives):
-                inf = ga.inflect_option(
-                    alt,
-                    code,
-                    context_before,
-                    context_after,
-                    pos_hint=pos_hint,
-                )
-                if (inf or "").strip().casefold() == surf_cf:
-                    return i
-        except Exception:
-            pass
-    return 0
+        for i in matches:
+            inf = ga.inflect_option(
+                alternatives[i],
+                code,
+                context_before,
+                context_after,
+                pos_hint=pos_hint,
+                words=word_meta if word_meta else None,
+            )
+            if surf.casefold() == (inf or "").strip().casefold():
+                return i
+    except Exception:
+        pass
+    if re.search(r"(?:ют|ут|ет|ит|ат|ят|ем|им|ал|ил|ли|т)$", surf, re.I):
+        for i in matches:
+            if _alt_pos_guess(alternatives[i]) == "verb":
+                return i
+    ph = (pos_hint or "").strip().lower()
+    if ph in ("noun", "n", "名词"):
+        for i in matches:
+            if _alt_pos_guess(alternatives[i]) == "noun":
+                return i
+    if ph in ("verb", "v", "动词"):
+        for i in matches:
+            if _alt_pos_guess(alternatives[i]) == "verb":
+                return i
+    return matches[0]
 
 
 def _words_for_surface(surface: str, to_code: str) -> list[dict[str, Any]]:
@@ -951,6 +1057,98 @@ def _words_for_surface(surface: str, to_code: str) -> list[dict[str, Any]]:
     except Exception:
         pass
     return []
+
+
+def _span_range_overlaps(
+    start: int, end: int, spans: list[dict[str, Any]]
+) -> bool:
+    return any(
+        not (end <= int(s.get("start") or 0) or start >= int(s.get("end") or 0))
+        for s in spans
+    )
+
+
+def _append_glossary_term_span(
+    text: str,
+    slot: dict[str, Any],
+    to_code: str,
+    spans: list[dict[str, Any]],
+) -> None:
+    """在已有译文中定位术语词形并补全高亮（TM 命中 / 占位符丢失时）。"""
+    alts = slot.get("alternatives")
+    if not isinstance(alts, list) or len(alts) < 2:
+        return
+    zh = str(slot.get("zh_source") or "").strip()
+    if any((s.get("zh_source") or "").strip() == zh for s in spans):
+        return
+    norm = unicodedata.normalize("NFKC", text or "")
+    if not norm:
+        return
+    code = (to_code or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return
+    try:
+        import glossary_inflection as gi
+    except ImportError:
+        return
+
+    word_meta = (
+        slot.get("words")
+        if isinstance(slot.get("words"), list)
+        else []
+    )
+    rx = gi._word_re(code)
+    for m in rx.finditer(norm):
+        start, end = m.start(), m.end()
+        if _span_range_overlaps(start, end, spans):
+            continue
+        token = m.group(0)
+        if not token.strip():
+            continue
+        ctx_before = norm[:start]
+        ctx_after = norm[end:]
+        if not any(
+            _token_matches_glossary_alternative(
+                token,
+                alt,
+                code,
+                ctx_before,
+                ctx_after,
+                pos_hint=slot.get("pos"),
+                word_meta=word_meta if word_meta else None,
+            )
+            for alt in alts
+            if (alt or "").strip()
+        ):
+            continue
+        chosen_index = _infer_chosen_index_for_surface(
+            token,
+            alts,
+            context_before=ctx_before,
+            context_after=ctx_after,
+            to_code=code,
+            pos_hint=slot.get("pos"),
+            word_meta=word_meta if word_meta else None,
+        )
+        spans.append(
+            {
+                "start": start,
+                "end": end,
+                "surface": token,
+                "zh_source": zh,
+                "raw_cell": str(slot.get("raw_cell") or ""),
+                "alternatives": list(alts),
+                "chosen_index": chosen_index,
+                "lemma": str(slot.get("lemma") or slot.get("replacement") or ""),
+                "fixed_grammemes": slot.get("fixed_grammemes"),
+                "pos": slot.get("pos"),
+                "words": _words_for_surface(token, code) or word_meta,
+                "context_before": ctx_before,
+                "context_after": ctx_after,
+                "target_lang": code,
+            }
+        )
+        return
 
 
 def _append_modal_verb_span(
@@ -1025,6 +1223,7 @@ def find_glossary_spans_in_target(
         return []
     spans: list[dict[str, Any]] = []
     for slot in slots:
+        _append_glossary_term_span(target_text, slot, to_code, spans)
         _append_modal_verb_span(target_text, slot, to_code, spans)
     return relocate_glossary_spans(target_text, spans)
 
