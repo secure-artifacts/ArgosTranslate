@@ -100,6 +100,9 @@ class UpdateDialog(QDialog):
         self._btn_release.setEnabled(False)
         self._btn_release.clicked.connect(self._open_release_page)
         row.addWidget(self._btn_check)
+        self._btn_history = QPushButton("历史版本…")
+        self._btn_history.clicked.connect(self._on_history)
+        row.addWidget(self._btn_history)
         row.addWidget(self._btn_apply)
         row.addWidget(self._btn_release)
         layout.addLayout(row)
@@ -113,6 +116,7 @@ class UpdateDialog(QDialog):
 
     def _set_busy(self, busy: bool) -> None:
         self._btn_check.setEnabled(not busy)
+        self._btn_history.setEnabled(not busy)
         can_apply = False
         if not busy and self._release is not None:
             from app_version import compare_versions
@@ -125,6 +129,14 @@ class UpdateDialog(QDialog):
 
     def _on_check(self) -> None:
         self._start_worker("check")
+
+    def _on_history(self) -> None:
+        try:
+            import version_history_dialog as vhd
+        except ImportError:
+            QMessageBox.warning(self, "历史版本", "未找到 version_history_dialog.py。")
+            return
+        vhd.open_version_history_dialog(self)
 
     def _on_apply(self) -> None:
         if self._release is None:

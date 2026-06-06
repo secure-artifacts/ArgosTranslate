@@ -107,6 +107,7 @@ def _normalize_pos(raw_pos: str) -> str:
 
 
 ROLE_WORD_META = Qt.UserRole + 42
+ROLE_ENTRY_POS_OVERRIDE = Qt.UserRole + 43
 
 _POS_OC_ZH: dict[str, str] = {
     "NOUN": "名词",
@@ -226,6 +227,61 @@ def _analyze_row_words(text: str, lang: str) -> list[dict[str, Any]]:
         return list(gi.analyze_slavic_phrase(text, lang).get("words") or [])
     except Exception:
         return []
+
+
+def _target_alternative_options(text: str) -> list[str]:
+    try:
+        import glossary_alternatives as ga
+
+        return ga.list_all_options(text)
+    except ImportError:
+        t = (text or "").strip()
+        return [t] if t else []
+
+
+def _auto_entry_pos_zh(tgt: str, lang: str, current: str = "") -> str:
+    """推断整体词性；若当前仅为默认「名词」占位则覆盖为推断结果。"""
+    inferred = _bucket_to_zh(infer_pos_for_target(tgt, lang))
+    cur = (current or "").strip()
+    if not cur:
+        return inferred
+    cur_bucket = _normalize_pos(cur)
+    inf_bucket = _normalize_pos(inferred)
+    if cur_bucket == "noun" and inf_bucket != "noun":
+        return inferred
+    return _bucket_to_zh(cur_bucket)
+
+
+def _words_pos_summary_or_infer(
+    tgt: str, lang: str, words: list[dict[str, Any]]
+) -> str:
+    if words:
+        summary = _words_pos_summary(words)
+        if summary and summary != "—":
+            return summary
+    t = (tgt or "").strip()
+    if not t:
+        return "—"
+    opts = _target_alternative_options(t)
+    if len(opts) > 1:
+        return _words_pos_summary_for_alternatives(opts, lang)
+    pos_zh = _auto_entry_pos_zh(t, lang)
+    return f"{t}({pos_zh})"
+
+
+def _words_pos_summary_for_alternatives(opts: list[str], lang: str) -> str:
+    if not opts:
+        return "—"
+    parts: list[str] = []
+    for opt in opts:
+        words = _analyze_row_words(opt, lang)
+        if words:
+            chunk = _words_pos_summary(words)
+            parts.append(chunk if chunk != "—" else opt)
+        else:
+            pos_zh = _auto_entry_pos_zh(opt, lang)
+            parts.append(f"{opt}({pos_zh})")
+    return " / ".join(parts)
 
 
 def _merge_words_with_overrides(
@@ -392,6 +448,13 @@ def _editable_pos_table_item(text: str, *, tooltip: str = "") -> QTableWidgetIte
     if tooltip:
         it.setToolTip(tooltip)
     return it
+
+
+def _make_entry_pos_item(text: str) -> QTableWidgetItem:
+    return _editable_pos_table_item(
+        text or "",
+        tooltip="单击可修改整体词性（名词 / 动词 / 形容词 / 其他）",
+    )
 
 
 def _display_case_zh(w: dict[str, Any]) -> str:
@@ -913,6 +976,7 @@ class GlossaryEditorDialog(QDialog):
         self._updating_pos = False
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        self.table.cellClicked.connect(self._on_table_cell_clicked)
 
         self._update_window_title()
         self.reload_from_file()
@@ -963,6 +1027,13 @@ class GlossaryEditorDialog(QDialog):
         if cols >= 4:
             hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
             hdr.setSectionResizeMode(3, QHeaderView.Stretch)
+            self.table.setEditTriggers(QAbstractItemView.CurrentChanged)
+            self.table.setItemDelegateForColumn(
+                2,
+                _ComboColumnDelegate(self.table, list(_ENTRY_POS_CHOICES)),
+            )
+        else:
+            self.table.setItemDelegateForColumn(2, None)
 
     def _update_pos_tool_visibility(self) -> None:
         show = _pos_supports_word_columns(self._tgt_code())
@@ -993,7 +1064,7 @@ class GlossaryEditorDialog(QDialog):
                 "某译法下还有用词变体时用括号（如 священник (батько/батьки)）。"
                 "翻译时在全部译法中随机取一种；译文中相关词会高亮，鼠标悬停可改选。"
                 "\n填写俄/乌语时，「整体词性」「逐词词性」列会自动识别词性、格与单复数；"
-                "双击「逐词词性」或点「逐词词性…」可校对单个单词词性。"
+                "单击「整体词性」可手动修改；双击「逐词词性」或点「逐词词性…」可校对单个单词词性。"
                 "可用「复制到剪贴板」或「导出」粘贴到 Google 表格。"
             )
         if self._tgt_code() == "uk":
@@ -1039,7 +1110,7 @@ class GlossaryEditorDialog(QDialog):
             if pos_raw:
                 pos = _normalize_pos(pos_raw)
             else:
-                pos = "noun"
+                pos = infer_pos_for_target(tgt, tgt_lang)
             entries.append((src, tgt, pos))
         return entries, bad
 
@@ -1177,8 +1248,9 @@ class GlossaryEditorDialog(QDialog):
                     words = []
         if not words and tgt_show.strip():
             words = _analyze_row_words(tgt_show, lang)
-        if entry_pos_zh == "名词" and tgt_show.strip():
-            entry_pos_zh = _bucket_to_zh(infer_pos_for_target(tgt_show, lang))
+        opts = _target_alternative_options(tgt_show)
+        if tgt_show.strip():
+            entry_pos_zh = _auto_entry_pos_zh(tgt_show, lang, entry_pos_zh)
         return entry_pos_zh, words
 
     def _set_row_word_meta(self, row: int, words: list[dict[str, Any]]) -> None:
@@ -1206,13 +1278,32 @@ class GlossaryEditorDialog(QDialog):
         if not tgt.strip():
             self._updating_pos = True
             try:
-                self.table.setItem(row, 2, GlossaryPasteTableWidget._make_item(""))
+                self._set_entry_pos_item(row, "")
                 self.table.setItem(row, 3, GlossaryPasteTableWidget._make_item(""))
                 self._set_row_word_meta(row, [])
             finally:
                 self._updating_pos = False
             return
         overrides = self._row_word_meta(row)
+        alt_opts = _target_alternative_options(tgt)
+        if len(alt_opts) > 1:
+            words = _analyze_row_words(alt_opts[0], lang)
+            words = _merge_words_with_overrides(words, overrides)
+            entry_pos = self._resolve_entry_pos(row, tgt, lang)
+            summary = _words_pos_summary_for_alternatives(alt_opts, lang)
+            self._updating_pos = True
+            try:
+                self._set_entry_pos_item(row, entry_pos, locked=False)
+                it3 = GlossaryPasteTableWidget._make_item(summary)
+                it3.setToolTip(
+                    summary + "\n\n逗号分隔的多个备选译法，翻译时随机择一。\n"
+                    "双击此行可编辑第一个备选的逐词词性。"
+                )
+                self.table.setItem(row, 3, it3)
+                self._set_row_word_meta(row, words)
+            finally:
+                self._updating_pos = False
+            return
         auto_words = _analyze_row_words(tgt, lang)
         words = _merge_words_with_overrides(auto_words, overrides)
         try:
@@ -1225,14 +1316,12 @@ class GlossaryEditorDialog(QDialog):
                 words = _merge_words_with_overrides(auto_words, overrides)
         except Exception:
             pass
-        entry_pos = self.table._cell_text(row, 2)
-        if not entry_pos.strip():
-            entry_pos = _bucket_to_zh(infer_pos_for_target(tgt, lang))
-        summary = _words_pos_summary(words)
+        entry_pos = self._resolve_entry_pos(row, tgt, lang)
+        summary = _words_pos_summary_or_infer(tgt, lang, words)
         self._updating_pos = True
         try:
             self.table.setItem(row, 1, GlossaryPasteTableWidget._make_item(tgt))
-            self.table.setItem(row, 2, GlossaryPasteTableWidget._make_item(entry_pos))
+            self._set_entry_pos_item(row, entry_pos)
             it3 = GlossaryPasteTableWidget._make_item(summary)
             it3.setToolTip(
                 summary + "\n\n双击此行可编辑各单词词性。"
@@ -1250,12 +1339,44 @@ class GlossaryEditorDialog(QDialog):
     ) -> None:
         if self._pos_column_count() < 4:
             return
-        summary = _words_pos_summary(words)
-        self.table.setItem(row, 2, GlossaryPasteTableWidget._make_item(entry_pos_zh))
+        summary = _words_pos_summary_or_infer(
+            self.table._cell_text(row, 1), self._tgt_code(), words
+        )
+        self._set_entry_pos_item(row, entry_pos_zh, locked=False)
         it3 = GlossaryPasteTableWidget._make_item(summary)
         it3.setToolTip(summary + "\n\n双击此行可编辑各单词词性。")
         self.table.setItem(row, 3, it3)
         self._set_row_word_meta(row, words)
+
+    def _entry_pos_locked(self, row: int) -> bool:
+        it = self.table.item(row, 2)
+        return bool(it and it.data(ROLE_ENTRY_POS_OVERRIDE))
+
+    def _set_entry_pos_item(
+        self, row: int, text: str, *, locked: bool | None = None
+    ) -> None:
+        if locked is None:
+            locked = self._entry_pos_locked(row)
+        it = _make_entry_pos_item(text)
+        if locked:
+            it.setData(ROLE_ENTRY_POS_OVERRIDE, True)
+        self.table.setItem(row, 2, it)
+
+    def _resolve_entry_pos(self, row: int, tgt: str, lang: str) -> str:
+        if self._entry_pos_locked(row):
+            return _normalize_pos(self.table._cell_text(row, 2))
+        return _normalize_pos(
+            _auto_entry_pos_zh(tgt, lang, self.table._cell_text(row, 2))
+        )
+
+    def _on_table_cell_clicked(self, row: int, col: int) -> None:
+        if self._pos_column_count() < 4 or col != 2:
+            return
+        if not self.table._cell_text(row, 1).strip():
+            return
+        item = self.table.item(row, col)
+        if item is not None:
+            self.table.editItem(item)
 
     def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
         if self._updating_pos:
@@ -1263,7 +1384,10 @@ class GlossaryEditorDialog(QDialog):
         if self._pos_column_count() < 4:
             return
         col = item.column()
-        if col in (1, 2):
+        if col == 2:
+            item.setData(ROLE_ENTRY_POS_OVERRIDE, True)
+            return
+        if col == 1:
             self._refresh_row_pos_columns(item.row())
 
     def _on_cell_double_clicked(self, row: int, col: int) -> None:
@@ -1316,6 +1440,24 @@ class GlossaryEditorDialog(QDialog):
     def _parse_target_with_row_meta(
         self, tgt_raw: str, tgt_lang: str, row: int
     ) -> tuple[Any, str]:
+        alt_opts = _target_alternative_options(tgt_raw)
+        if tgt_lang in ("ru", "uk") and len(alt_opts) > 1:
+            normalized: list[Any] = []
+            seen: set[str] = set()
+            for opt in alt_opts:
+                piece = (opt or "").strip()
+                if not piece:
+                    continue
+                key = piece.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                val = tb.parse_target_cell(piece, tgt_lang)
+                normalized.append(val if val else piece)
+            entry_pos = self._resolve_entry_pos(row, tgt_raw, tgt_lang)
+            if len(normalized) == 1:
+                return normalized[0], entry_pos
+            return normalized, entry_pos
         val = tb.parse_target_cell(tgt_raw, tgt_lang)
         entry_pos = _normalize_pos(self.table._cell_text(row, 2))
         if tgt_lang not in ("ru", "uk"):
@@ -1350,11 +1492,7 @@ class GlossaryEditorDialog(QDialog):
                     )
             except Exception:
                 pass
-        pos_raw = self.table._cell_text(row, 2)
-        if pos_raw.strip():
-            entry_pos = _normalize_pos(pos_raw)
-        elif tgt_raw.strip():
-            entry_pos = infer_pos_for_target(tgt_raw, tgt_lang)
+        entry_pos = self._resolve_entry_pos(row, tgt_raw, tgt_lang)
         return val, entry_pos
 
     def _table_export_rows(self) -> list[list[str]]:
@@ -1414,20 +1552,13 @@ class GlossaryEditorDialog(QDialog):
         for src in keys:
             entry = data[src]
             for tgt_show in self._target_rows_for_entry(entry, tgt_lang):
-                if defer_morph:
-                    pos_raw = entry.get("pos") if isinstance(entry, dict) else None
-                    entry_pos = _bucket_to_zh(
-                        _normalize_pos(str(pos_raw or "noun"))
+                try:
+                    entry_pos, words = self._words_and_pos_for_row(
+                        entry, tgt_lang, tgt_show
                     )
-                    words: list[dict[str, Any]] = []
-                else:
-                    try:
-                        entry_pos, words = self._words_and_pos_for_row(
-                            entry, tgt_lang, tgt_show
-                        )
-                    except Exception:
-                        entry_pos = "名词"
-                        words = []
+                except Exception:
+                    entry_pos = _auto_entry_pos_zh(tgt_show, tgt_lang)
+                    words = []
                 display_rows.append((src, tgt_show, entry_pos, words))
         n = len(display_rows) + 1
         self._updating_pos = True
@@ -1449,7 +1580,7 @@ class GlossaryEditorDialog(QDialog):
             self.table.setItem(last, 0, GlossaryPasteTableWidget._make_item(""))
             self.table.setItem(last, 1, GlossaryPasteTableWidget._make_item(""))
             if cols >= 4:
-                self.table.setItem(last, 2, GlossaryPasteTableWidget._make_item(""))
+                self._set_entry_pos_item(last, "", locked=False)
                 self.table.setItem(last, 3, GlossaryPasteTableWidget._make_item(""))
         finally:
             self.table.setUpdatesEnabled(True)

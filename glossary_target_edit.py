@@ -167,6 +167,17 @@ class GlossarySpanMixin:
         finally:
             self._programmatic_update = False
 
+    def set_glossary_swap_handler(
+        self,
+        handler: Callable[
+            [int, int, list[dict[str, Any]]],
+            tuple[str | None, list[dict[str, Any]] | None],
+        ]
+        | None,
+    ) -> None:
+        """词性变化时整句重译：(span_index, option_index, spans) -> (text, spans)。"""
+        self._glossary_swap_handler = handler
+
     def glossary_spans(self) -> list[dict[str, Any]]:
         return [dict(s) for s in getattr(self, "_glossary_spans", [])]
 
@@ -266,25 +277,44 @@ class GlossarySpanMixin:
                 sp = spans[span_index] = relocated[0]
         except ImportError:
             pass
-        start = int(sp.get("start") or 0)
-        end = int(sp.get("end") or 0)
-        if start < 0 or end <= start or end > len(plain):
-            return
+        old_index = int(sp.get("chosen_index") or 0)
+        old_option = (
+            (alts[old_index] or "").strip() if 0 <= old_index < len(alts) else ""
+        )
         lang = str(sp.get("target_lang") or "ru")
-        ctx_before = plain[:start]
-        ctx_after = plain[end:]
         try:
             import glossary_alternatives as ga
         except ImportError:
             ga = None  # type: ignore
+        if ga is not None and ga.pos_bucket_changed(old_option, option, lang):
+            handler = getattr(self, "_glossary_swap_handler", None)
+            if handler is not None:
+                try:
+                    new_text, new_spans = handler(span_index, option_index, spans)
+                except Exception:
+                    new_text, new_spans = None, None
+                if new_text is not None and new_spans is not None:
+                    self.set_glossary_translation(new_text, new_spans)
+                    self._active_span_index = span_index
+                    self._popup.hide()
+                    return
+        start = int(sp.get("start") or 0)
+        end = int(sp.get("end") or 0)
+        if start < 0 or end <= start or end > len(plain):
+            return
+        ctx_before = plain[:start]
+        ctx_after = plain[end:]
+        pos_hint = str(sp.get("pos") or "").strip() or None
         if ga is not None:
+            pos_hint = ga.pos_bucket_for_option(option, lang)
             new_surface = ga.inflect_option(
                 option,
                 lang,
                 ctx_before,
                 ctx_after,
                 fixed_grammemes=sp.get("fixed_grammemes"),
-                pos_hint=sp.get("pos"),
+                pos_hint=pos_hint,
+                words=sp.get("words"),
             )
         else:
             new_surface = option
@@ -307,6 +337,7 @@ class GlossarySpanMixin:
             sp["surface"] = new_surface
             sp["chosen_index"] = option_index
             sp["lemma"] = option
+            sp["pos"] = pos_hint
             sp["start"] = new_start
             sp["end"] = new_end
             sp["context_before"] = new_plain[:new_start]

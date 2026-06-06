@@ -78,7 +78,7 @@ def _fast_retry_heuristics(
     if not src or not pp:
         return False
     if _GLOSSA_MARK.search(pp):
-        return False
+        return True
 
     try:
         import argos_translation_quality as atq
@@ -237,6 +237,7 @@ def ensure_quality(
     translation,
     *,
     prepare_fn,
+    glossary_translate_fn=None,
 ) -> str:
     try:
         import argos_translation_quality as atq
@@ -311,14 +312,20 @@ def ensure_quality(
     retry_limit = len(profiles) if _extra_profiles_enabled() else max(1, retries)
     if translation is not None:
         for p in profiles[:retry_limit]:
-            alt = retry_translate(
-                source_text,
-                translation,
-                from_code,
-                to_code,
-                prepare_fn=prepare_fn,
-                profile=p,
-            )
+            if glossary_translate_fn is not None:
+                try:
+                    alt = glossary_translate_fn(source_text)
+                except Exception:
+                    alt = None
+            else:
+                alt = retry_translate(
+                    source_text,
+                    translation,
+                    from_code,
+                    to_code,
+                    prepare_fn=prepare_fn,
+                    profile=p,
+                )
             if alt:
                 candidates.append(alt)
             if atq.looks_good_enough(source_text, alt or "", from_code, to_code):

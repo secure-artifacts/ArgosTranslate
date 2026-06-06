@@ -169,6 +169,7 @@ def _critical_issues() -> frozenset[str]:
     return frozenset(
         {
             "glossa_leak",
+            "glossary_miss",
             "too_short",
             "heavy_cjk_residue",
             "degenerate_repeat",
@@ -215,6 +216,8 @@ def _score_core(
     source_text: str,
     target_text: str,
     to_code: str,
+    *,
+    from_code: str = "",
 ) -> tuple[float, list[str], int]:
     """轻量评分（无 fluency）。"""
     src = (source_text or "").strip()
@@ -287,6 +290,21 @@ def _score_core(
     except (ImportError, AttributeError):
         pass
 
+    fc = (from_code or "").strip().lower()
+    if fc and is_zh_to_slavic(fc, code):
+        try:
+            import terminology_bridge as tb
+
+            if tb.should_apply_glossary(fc, code):
+                _, slots = tb.mask_and_slots_for_source(src, code)
+                if slots:
+                    if not tb.glossary_slots_satisfied(hyp, slots, to_code=code):
+                        miss = tb.count_missing_glossary_slots(hyp, slots)
+                        issues.append("glossary_miss")
+                        score -= min(0.55, 0.18 * max(1, miss))
+        except Exception:
+            pass
+
     return max(0.0, min(1.0, score)), issues, zh_n
 
 
@@ -330,7 +348,9 @@ def score_translation(
     """
     src = (source_text or "").strip()
     policy = quality_tier_policy(src)
-    score, issues, zh_n = _score_core(source_text, target_text, to_code)
+    score, issues, zh_n = _score_core(
+        source_text, target_text, to_code, from_code=from_code
+    )
     rep = QualityReport(
         score,
         issues,
@@ -427,7 +447,7 @@ def should_improve_translation(
 def retry_profile_for_issues(issues: list[str]) -> str:
     """按问题类型选推理档，单次重译即可对准。"""
     s = set(issues or [])
-    if s & {"too_short", "low_cyrillic", "collocation_miss"}:
+    if s & {"too_short", "low_cyrillic", "collocation_miss", "glossary_miss"}:
         return "coverage"
     if s & {"degenerate_repeat", "anti_mt", "generic_mt", "low_native_fluency"}:
         return "fluent"

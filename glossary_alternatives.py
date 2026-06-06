@@ -1,7 +1,7 @@
 """
 术语库解析：
 - 源语（中文）/ ; 分隔 → 多种中文说法对应同一外语（翻译时任一侧均匹配）；
-- 目标语单元格 / ; 换行 与括号 () → 多种外语译法（翻译时随机择一，可悬停改选）。
+- 目标语单元格 / ; 换行、逗号（仅短词备选） 与括号 () → 多种外语译法（翻译时随机择一，可悬停改选）。
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import re
 from typing import Any, Iterable
 
 _TOP_SEP = frozenset({"/", ";", "；", "\n"})
+_COMMA_ALT_SEP = frozenset({",", "，"})
 _SOURCE_ALIAS_SEP = frozenset({"/", ";", "；"})
 _PAREN_SUFFIX = re.compile(r"^(.*?)\(([^()]+)\)\s*$")
 
@@ -43,9 +44,31 @@ def _split_at_seps(text: str, seps: frozenset[str]) -> list[str]:
 
 
 def split_top_level(text: str) -> list[str]:
-    """目标语：按 / ; 换行拆分，忽略括号内的分隔符。"""
+    """目标语：按 / ; 换行拆分；短词逗号备选亦拆分（忽略括号内的分隔符）。"""
     text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    return _split_at_seps(text, _TOP_SEP)
+    parts = _split_at_seps(text, _TOP_SEP)
+    if len(parts) > 1:
+        return parts
+    comma_parts = _split_at_seps(text, _COMMA_ALT_SEP)
+    if len(comma_parts) > 1 and _looks_like_word_alternatives(comma_parts):
+        return comma_parts
+    return parts if parts else ([text.strip()] if text.strip() else [])
+
+
+def _looks_like_word_alternatives(parts: list[str]) -> bool:
+    """逗号分隔的若干单词 → 译法备选，而非短语或句子。"""
+    if len(parts) < 2:
+        return False
+    for part in parts:
+        t = (part or "").strip()
+        if not t:
+            return False
+        words = re.findall(r"[А-Яа-яЁёA-Za-z\-']+", t)
+        if len(words) != 1:
+            return False
+        if re.sub(r"\s+", "", t).casefold() != words[0].casefold():
+            return False
+    return True
 
 
 def split_source_aliases(text: str) -> list[str]:
@@ -88,7 +111,12 @@ def list_all_options(raw: str) -> list[str]:
     text = (raw or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not text:
         return []
-    if not any(c in text for c in _TOP_SEP) and "(" not in text:
+    has_top_sep = any(c in text for c in _TOP_SEP)
+    has_paren = "(" in text
+    if not has_top_sep and not has_paren:
+        comma_parts = _split_at_seps(text, _COMMA_ALT_SEP)
+        if len(comma_parts) > 1 and _looks_like_word_alternatives(comma_parts):
+            return _dedupe_options([p.strip() for p in comma_parts])
         return [text]
     opts: list[str] = []
     seen: set[str] = set()
@@ -185,6 +213,71 @@ def pick_for_translation(entry: Any, lang_code: str) -> tuple[str, list[str], in
     if not opts:
         return "", [], 0
     chosen, idx = pick_random(opts)
+    return chosen, opts, idx
+
+
+_ROLE_POS_ORDER: dict[str, tuple[str, ...]] = {
+    "object": ("noun", "other", "verb", "adj"),
+    "predicate": ("verb", "adj", "noun", "other"),
+    "modifier": ("adj", "noun", "other", "verb"),
+    "adverb": ("adj", "other", "noun", "verb"),
+}
+
+
+def _pos_bucket_for_option(opt: str, lang_code: str) -> str:
+    try:
+        from glossary_manager import infer_pos_for_target
+
+        return infer_pos_for_target(opt, lang_code)
+    except ImportError:
+        return "noun"
+
+
+def pos_bucket_for_option(opt: str, lang_code: str) -> str:
+    return _pos_bucket_for_option(opt, lang_code)
+
+
+def pos_bucket_changed(old_opt: str, new_opt: str, lang_code: str) -> bool:
+    return _pos_bucket_for_option(old_opt, lang_code) != _pos_bucket_for_option(
+        new_opt, lang_code
+    )
+
+
+def pick_option_for_role(
+    options: list[str],
+    lang_code: str,
+    role: str,
+) -> tuple[str, int]:
+    """按语法角色从备选译法中择一（优先匹配词性，同词性再随机）。"""
+    opts = _dedupe_options(list(options or []))
+    if not opts:
+        return "", 0
+    order = _ROLE_POS_ORDER.get((role or "").strip().lower(), _ROLE_POS_ORDER["object"])
+    code = (lang_code or "").strip().lower()
+    for bucket in order:
+        matched = [o for o in opts if _pos_bucket_for_option(o, code) == bucket]
+        if not matched:
+            continue
+        chosen = matched[0]
+        for o in opts:
+            if o in matched:
+                chosen = o
+                break
+        return chosen, opts.index(chosen)
+    chosen, idx = pick_random(opts)
+    return chosen, idx
+
+
+def pick_for_translation_by_role(
+    entry: Any,
+    lang_code: str,
+    role: str,
+) -> tuple[str, list[str], int]:
+    """翻译时按中文/句法角色选择最匹配词性的译法。"""
+    opts = list_options_from_entry(entry, lang_code)
+    if not opts:
+        return "", [], 0
+    chosen, idx = pick_option_for_role(opts, lang_code, role)
     return chosen, opts, idx
 
 

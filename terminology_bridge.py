@@ -125,17 +125,45 @@ def target_cell_text(entry: Any, lang_code: str) -> str:
 
 def parse_ru_cell(ru_raw: str) -> Any:
     """将表格单元格解析为写入 JSON 的 ru 字段（识别格并规范为 lemma）。"""
-    ru_raw = (ru_raw or "").strip()
-    if not ru_raw:
+    return _parse_slavic_cell_alternatives(ru_raw, "ru")
+
+
+def _parse_slavic_cell_alternatives(raw: str, lang: str) -> Any:
+    raw = (raw or "").strip()
+    if not raw:
         return ""
-    if ru_raw.startswith("{") and ru_raw.endswith("}"):
+    if raw.startswith("{") and raw.endswith("}"):
         try:
-            obj = json.loads(ru_raw)
+            obj = json.loads(raw)
             if isinstance(obj, dict):
                 return obj
         except json.JSONDecodeError:
             pass
-    return gi.normalize_for_glossary_storage(ru_raw, "ru")
+    try:
+        import glossary_alternatives as ga
+
+        opts = ga.list_all_options(raw)
+    except ImportError:
+        opts = [raw]
+    if len(opts) <= 1:
+        return gi.normalize_for_glossary_storage(raw, lang)
+    normalized: list[Any] = []
+    seen: set[str] = set()
+    for opt in opts:
+        piece = (opt or "").strip()
+        if not piece:
+            continue
+        key = piece.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        val = gi.normalize_for_glossary_storage(piece, lang)
+        normalized.append(val if val else piece)
+    if not normalized:
+        return gi.normalize_for_glossary_storage(raw, lang)
+    if len(normalized) == 1:
+        return normalized[0]
+    return normalized
 
 
 def parse_target_cell(raw: str, lang_code: str) -> Any:
@@ -154,7 +182,7 @@ def parse_target_cell(raw: str, lang_code: str) -> Any:
                     return obj
             except json.JSONDecodeError:
                 pass
-        return gi.normalize_for_glossary_storage(raw, "uk")
+        return _parse_slavic_cell_alternatives(raw, "uk")
     return raw
 
 
@@ -376,51 +404,42 @@ def _glossary_alias_matches(glossary: dict[str, Any]) -> list[tuple[str, str]]:
         else:
             aliases = [storage_key]
         for alias in aliases:
-            if alias:
+            if alias and _alias_ok_for_match(alias, storage_key):
                 pairs.append((alias, storage_key))
     pairs.sort(key=lambda p: len(p[0]), reverse=True)
     return pairs
 
 
+def _alias_ok_for_match(alias: str, storage_key: str) -> bool:
+    """避免单字别名误匹配（如「年」→ 年份）；整键为单字时仍允许。"""
+    a = (alias or "").strip()
+    key = (storage_key or "").strip()
+    if not a:
+        return False
+    if len(a) >= 2:
+        return True
+    return a == key and len(key) == 1
+
+
 def mask_source_terms(
-    text: str, glossary: dict[str, Any], to_code: str
+    text: str,
+    glossary: dict[str, Any],
+    to_code: str,
+    *,
+    forced_by_key: dict[str, str] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     to_code = (to_code or "").strip().lower()
+    forced = {
+        (k or "").strip(): (v or "").strip()
+        for k, v in (forced_by_key or {}).items()
+        if (k or "").strip() and (v or "").strip()
+    }
     slots: list[dict[str, Any]] = []
     out = text
     used = 0
     for alias, key in _glossary_alias_matches(glossary):
         entry = glossary[key]
-        try:
-            if ga is not None:
-                chosen_surface, alternatives, chosen_index = ga.pick_for_translation(
-                    entry, to_code
-                )
-                repl = (
-                    _lemma_for_chosen(chosen_surface, to_code)
-                    if chosen_surface
-                    else None
-                )
-            else:
-                repl = _resolve_target(entry, to_code)
-                alternatives = [repl] if repl else []
-                chosen_index = 0
-                chosen_surface = alternatives[0] if alternatives else ""
-        except Exception:
-            # 跳过损坏术语条目，不影响其它术语与整句翻译。
-            continue
-        if not repl:
-            continue
-        meta = gi.extract_term_meta(entry, to_code)
-        if chosen_surface:
-            meta["lemma"] = _lemma_for_chosen(chosen_surface, to_code)
-            analysis = gi.analyze_slavic_phrase(chosen_surface, to_code)
-            meta["words"] = analysis.get("words") or meta.get("words") or []
-        if not meta.get("lemma"):
-            meta["lemma"] = repl
-        raw_cell = _raw_target_string(entry, to_code) or repl
-        if ga is not None and not alternatives:
-            alternatives = ga.list_options_from_entry(entry, to_code) or [repl]
+        raw_cell = _raw_target_string(entry, to_code) or ""
         search_from = 0
         while True:
             idx = out.find(alias, search_from)
@@ -428,6 +447,66 @@ def mask_source_terms(
                 break
             zh_before = out[:idx]
             zh_after = out[idx + len(alias) :]
+            try:
+                forced_surface = forced.get(key, "").strip()
+                lock_alternative = False
+                gloss_role = gi.infer_zh_glossary_role(zh_before, zh_after)
+                if ga is not None:
+                    alternatives = ga.list_options_from_entry(entry, to_code)
+                    if forced_surface:
+                        chosen_surface = forced_surface
+                        chosen_index = 0
+                        for i, alt in enumerate(alternatives):
+                            if (
+                                (alt or "").strip().casefold()
+                                == forced_surface.casefold()
+                            ):
+                                chosen_index = i
+                                break
+                        fb = ga.pos_bucket_for_option(forced_surface, to_code)
+                        if fb == "verb" and gloss_role == "object":
+                            gloss_role = "predicate"
+                        lock_alternative = True
+                    else:
+                        chosen_surface, alternatives, chosen_index = (
+                            ga.pick_for_translation_by_role(
+                                entry, to_code, gloss_role
+                            )
+                        )
+                    repl = (
+                        _lemma_for_chosen(chosen_surface, to_code)
+                        if chosen_surface
+                        else None
+                    )
+                else:
+                    repl = _resolve_target(entry, to_code)
+                    alternatives = [repl] if repl else []
+                    chosen_index = 0
+                    chosen_surface = alternatives[0] if alternatives else ""
+            except Exception:
+                search_from = idx + len(alias)
+                continue
+            if not repl:
+                search_from = idx + len(alias)
+                continue
+            meta = gi.extract_term_meta(entry, to_code)
+            if chosen_surface:
+                meta["lemma"] = _lemma_for_chosen(chosen_surface, to_code)
+                analysis = gi.analyze_slavic_phrase(chosen_surface, to_code)
+                meta["words"] = analysis.get("words") or meta.get("words") or []
+                if lock_alternative:
+                    try:
+                        from glossary_manager import infer_pos_for_target
+
+                        meta["pos"] = infer_pos_for_target(chosen_surface, to_code)
+                    except ImportError:
+                        pass
+            if not meta.get("lemma"):
+                meta["lemma"] = repl
+            if ga is not None and not alternatives:
+                alternatives = ga.list_options_from_entry(entry, to_code) or [repl]
+            if not raw_cell:
+                raw_cell = repl or ""
             surface, ascii_m = _glossary_surface_marker(used)
             used += 1
             out = out[:idx] + surface + out[idx + len(alias) :]
@@ -449,6 +528,8 @@ def mask_source_terms(
                     "raw_cell": raw_cell,
                     "alternatives": alternatives,
                     "chosen_index": chosen_index,
+                    "lock_alternative": lock_alternative,
+                    "glossary_role": gloss_role if lock_alternative else "",
                 }
             )
     return out, slots
@@ -557,6 +638,9 @@ def _repair_lost_glossary_slot(out: str, slot: dict[str, Any], code: str) -> str
     if code not in ("ru", "uk"):
         return out
     if _glossary_term_visible(out, slot):
+        return out
+    pos_raw = str(slot.get("pos") or "").strip().lower()
+    if pos_raw in ("noun", "n", "名词", "adj", "adjective", "形容词", "other", "其他"):
         return out
     m = _MODAL_VERB_SLOT_RE.search(out or "")
     if not m:
@@ -758,6 +842,65 @@ def restore_markers_with_spans(
                 if out != prev:
                     _append_modal_verb_span(out, s, code, spans)
     return out, spans
+
+
+def glossary_slots_satisfied(
+    target_text: str,
+    slots: list[dict[str, Any]],
+    *,
+    to_code: str = "",
+) -> bool:
+    """译文是否已含全部术语（无 GLOSSA 泄漏、无缺失 slot）。"""
+    if not slots:
+        return True
+    out = (target_text or "").strip()
+    if not out:
+        return False
+    if _GLOSSA_MARKER_RE.search(out) or _glossary_marker_still_present(out):
+        return False
+    for slot in slots:
+        if not _glossary_term_visible(out, slot):
+            return False
+    return True
+
+
+def count_missing_glossary_slots(
+    target_text: str,
+    slots: list[dict[str, Any]],
+) -> int:
+    if not slots:
+        return 0
+    out = (target_text or "").strip()
+    if _GLOSSA_MARKER_RE.search(out) or _glossary_marker_still_present(out):
+        return len(slots)
+    return sum(1 for s in slots if not _glossary_term_visible(out, s))
+
+
+def mask_and_slots_for_source(
+    source_text: str,
+    to_code: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    """源文术语掩码与 slot 列表。"""
+    glossary = load_glossary()
+    return mask_source_terms(source_text, glossary, to_code)
+
+
+def translate_with_glossary_slots(
+    translation,
+    source_text: str,
+    from_code: str,
+    to_code: str,
+    *,
+    on_progress=None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """带术语掩码的完整翻译（供质量重试等复用）。"""
+    return apply_glossary_with_spans(
+        translation,
+        source_text,
+        from_code,
+        to_code,
+        on_progress=on_progress,
+    )
 
 
 def _infer_chosen_index_for_surface(
@@ -1044,7 +1187,38 @@ def _restore_glossary_target(
     ordered = sorted(slots, key=_slot_sort_key, reverse=True)
     for slot in ordered:
         if not _glossary_term_visible(out, slot):
+            prev = out
             out = _repair_lost_glossary_slot(out, slot, to_code)
+            if out != prev and not _glossary_term_visible(out, slot):
+                out = prev
+    return out
+
+
+def _append_fragment_translation(
+    out: str,
+    frag: _ZhFragment,
+    src_rstrip_len: int,
+    translation,
+) -> str:
+    """补译未掩码中文片段；过滤年份/纯数字等明显误译。"""
+    frag_text = (frag.text or "").strip()
+    if not frag_text or _zh_char_count(frag_text) < 2:
+        return out
+    try:
+        chunk = translation.translate(_prepare_for_argos_engine(frag_text))
+    except Exception:
+        return out
+    chunk = (chunk or "").strip().strip(".,;:!?")
+    if not chunk or chunk.casefold() in out.casefold():
+        return out
+    if re.fullmatch(r"[\d\s\.\-]+", chunk):
+        return out
+    if re.search(r"\b\d{4}\b", chunk) and _zh_char_count(frag_text) <= 3:
+        return out
+    if frag.start == 0:
+        return f"{chunk} {out.lstrip()}".strip()
+    if frag.end >= src_rstrip_len:
+        return f"{out.rstrip()} {chunk}".strip()
     return out
 
 
@@ -1055,17 +1229,29 @@ def _full_retranslate_zh_slavic(
     slots: list[dict[str, Any]],
     *,
     use_glossary: bool,
+    masked_text: str | None = None,
 ) -> str:
+    src = (source_text or "").strip()
+    if not src:
+        return ""
+    if use_glossary and slots:
+        text_for_mt = (masked_text or "").strip()
+        if not text_for_mt:
+            text_for_mt, slots = mask_and_slots_for_source(src, to_code)
+        try:
+            full_raw = translation.translate(
+                _prepare_for_argos_engine(text_for_mt)
+            )
+        except Exception:
+            return ""
+        full_raw = (full_raw or "").strip()
+        return _restore_glossary_target(
+            src, full_raw, to_code, slots
+        ).strip()
     try:
-        full_raw = translation.translate(_prepare_for_argos_engine(source_text))
+        return translation.translate(_prepare_for_argos_engine(src)).strip()
     except Exception:
         return ""
-    full_raw = (full_raw or "").strip()
-    if use_glossary and slots:
-        return _restore_glossary_target(
-            source_text, full_raw, to_code, slots
-        ).strip()
-    return full_raw
 
 
 def _full_sentence_likely_incomplete(
@@ -1124,16 +1310,21 @@ def ensure_zh_to_slavic_translation_complete(
         return target_text
 
     slots: list[dict[str, Any]] = []
+    masked_src: str | None = None
     apply_gloss = bool(
         use_glossary and should_apply_glossary(from_code, to_code)
     )
     if apply_gloss:
-        glossary = load_glossary()
-        _, slots = mask_source_terms(src, glossary, code)
+        masked_src, slots = mask_and_slots_for_source(src, code)
 
     if _GLOSSA_MARKER_RE.search(out):
         full_out = _full_retranslate_zh_slavic(
-            src, code, translation, slots, use_glossary=apply_gloss
+            src,
+            code,
+            translation,
+            slots,
+            use_glossary=apply_gloss,
+            masked_text=masked_src,
         )
         if full_out:
             out = full_out
@@ -1164,7 +1355,12 @@ def ensure_zh_to_slavic_translation_complete(
     has_middle = any(0 < f.start and f.end < len(src.rstrip()) for f in missing)
     if has_middle or len(missing) >= 2:
         full_out = _full_retranslate_zh_slavic(
-            src, code, translation, slots, use_glossary=apply_gloss
+            src,
+            code,
+            translation,
+            slots,
+            use_glossary=apply_gloss,
+            masked_text=masked_src,
         )
         if full_out and (
             len(full_out) > len(out)
@@ -1181,20 +1377,9 @@ def ensure_zh_to_slavic_translation_complete(
         if _fragment_missing_in_target(f.text, out, translation)
     ]
     missing.sort(key=lambda f: f.start)
+    src_rstrip_len = len(src.rstrip())
     for frag in missing:
-        try:
-            chunk = translation.translate(
-                _prepare_for_argos_engine(frag.text)
-            )
-        except Exception:
-            continue
-        chunk = (chunk or "").strip().strip(".,;:!?")
-        if not chunk or chunk.casefold() in out.casefold():
-            continue
-        if frag.start == 0:
-            out = f"{chunk} {out.lstrip()}".strip()
-        elif frag.end >= len(src.rstrip()):
-            out = f"{out.rstrip()} {chunk}".strip()
+        out = _append_fragment_translation(out, frag, src_rstrip_len, translation)
 
     still = [
         f
@@ -1203,7 +1388,12 @@ def ensure_zh_to_slavic_translation_complete(
     ]
     if still:
         full_out = _full_retranslate_zh_slavic(
-            src, code, translation, slots, use_glossary=apply_gloss
+            src,
+            code,
+            translation,
+            slots,
+            use_glossary=apply_gloss,
+            masked_text=masked_src,
         )
         if full_out:
             return full_out.strip()
@@ -1263,7 +1453,10 @@ def enforce_glossary_in_target(
     ordered = sorted(slots, key=_slot_sort_key, reverse=True)
     for slot in ordered:
         if not _glossary_term_visible(out, slot):
+            prev = out
             out = _repair_lost_glossary_slot(out, slot, to_code)
+            if out != prev and not _glossary_term_visible(out, slot):
+                out = prev
     return out
 
 
@@ -1287,6 +1480,7 @@ def apply_glossary_with_spans(
     to_code: str,
     *,
     on_progress=None,
+    forced_by_key: dict[str, str] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     def tr(s: str) -> str:
         prepared = _prepare_for_argos_engine(s)
@@ -1303,9 +1497,192 @@ def apply_glossary_with_spans(
     if not should_apply_glossary(from_code, to_code):
         return tr(text), []
     glossary = load_glossary()
-    masked, slots = mask_source_terms(text, glossary, to_code)
+    masked, slots = mask_source_terms(
+        text, glossary, to_code, forced_by_key=forced_by_key
+    )
     if not slots:
         return tr(text), []
     raw = tr(masked)
     out, spans = restore_markers_with_spans(raw, slots, to_code=to_code)
     return out, spans
+
+
+def _append_swapped_term_span(
+    target: str,
+    spans: list[dict[str, Any]],
+    *,
+    zh_source: str,
+    alternatives: list[str],
+    chosen_index: int,
+    option_lemma: str,
+    to_code: str,
+) -> list[dict[str, Any]]:
+    """整句改写后补回术语高亮（变位形可能不在 find 结果中）。"""
+    if any((s.get("zh_source") or "").strip() == zh_source for s in spans):
+        return spans
+    alts = [(a or "").strip() for a in alternatives if (a or "").strip()]
+    if len(alts) < 2:
+        return spans
+    code = (to_code or "").strip().lower()
+    candidates: list[str] = []
+    if 0 <= chosen_index < len(alts):
+        candidates.append(alts[chosen_index])
+    try:
+        bucket = ga.pos_bucket_for_option(option_lemma, code) if ga else "noun"
+    except Exception:
+        bucket = "noun"
+    if bucket == "verb":
+        try:
+            words = gi._word_re(code).findall(target or "")
+            subj = words[0] if words else ""
+            number = gi._subject_grammatical_number(subj, code)
+            candidates.append(
+                gi._verb_present_third_person(option_lemma, number, code)
+            )
+        except Exception:
+            pass
+    for cand in candidates:
+        surf = (cand or "").strip()
+        if not surf:
+            continue
+        for probe in (surf, surf.lower(), surf.capitalize()):
+            pos = (target or "").find(probe)
+            if pos < 0:
+                continue
+            start, end = pos, pos + len(probe)
+            if any(
+                not (end <= int(s.get("start") or 0) or start >= int(s.get("end") or 0))
+                for s in spans
+            ):
+                continue
+            ctx_before = target[:start]
+            ctx_after = target[end:]
+            spans.append(
+                {
+                    "start": start,
+                    "end": end,
+                    "surface": probe,
+                    "zh_source": zh_source,
+                    "alternatives": alts,
+                    "chosen_index": chosen_index,
+                    "lemma": option_lemma,
+                    "pos": bucket,
+                    "words": gi.analyze_slavic_phrase(probe, code).get("words")
+                    or [],
+                    "context_before": ctx_before,
+                    "context_after": ctx_after,
+                    "target_lang": code,
+                }
+            )
+            return spans
+    return spans
+
+
+def swap_glossary_alternative_in_target(
+    source_text: str,
+    target_text: str,
+    spans: list[dict[str, Any]],
+    span_index: int,
+    option_index: int,
+    from_code: str,
+    to_code: str,
+    translation,
+    *,
+    on_progress=None,
+) -> tuple[str | None, list[dict[str, Any]] | None]:
+    """
+    用户在译文区切换术语译法时：若词性桶变化（名↔动等），整句重译并调整句法；
+    同词性则返回 (None, None) 由 UI 做局部变格替换。
+    """
+    if span_index < 0 or span_index >= len(spans):
+        return None, None
+    sp = spans[span_index]
+    alts = sp.get("alternatives")
+    if not isinstance(alts, list) or option_index < 0 or option_index >= len(
+        alts
+    ):
+        return None, None
+    new_option = (alts[option_index] or "").strip()
+    old_index = int(sp.get("chosen_index") or 0)
+    old_option = (alts[old_index] or "").strip() if old_index < len(alts) else ""
+    if not new_option:
+        return None, None
+    if ga is None:
+        return None, None
+    if not ga.pos_bucket_changed(old_option, new_option, to_code):
+        return None, None
+
+    forced: dict[str, str] = {}
+    forced_indices: dict[str, int] = {}
+    for i, slot_sp in enumerate(spans):
+        zh = (slot_sp.get("zh_source") or "").strip()
+        if not zh:
+            continue
+        slot_alts = slot_sp.get("alternatives")
+        if not isinstance(slot_alts, list):
+            continue
+        pick = option_index if i == span_index else int(
+            slot_sp.get("chosen_index") or 0
+        )
+        if pick < 0 or pick >= len(slot_alts):
+            continue
+        opt = (slot_alts[pick] or "").strip()
+        if opt:
+            forced[zh] = opt
+            forced_indices[zh] = pick
+
+    new_bucket = ga.pos_bucket_for_option(new_option, to_code)
+    if new_bucket == "verb":
+        try:
+            direct = gi.rewrite_esto_ot_for_verb_glossary(
+                target_text, new_option, to_code
+            )
+        except Exception:
+            direct = None
+        if direct and direct.strip():
+            new_target = direct.strip()
+            new_spans = find_glossary_spans_in_target(
+                source_text, new_target, from_code, to_code
+            )
+            new_spans = _append_swapped_term_span(
+                new_target,
+                new_spans,
+                zh_source=(sp.get("zh_source") or "").strip(),
+                alternatives=alts,
+                chosen_index=option_index,
+                option_lemma=new_option,
+                to_code=to_code,
+            )
+            for slot_sp in new_spans:
+                zh = (slot_sp.get("zh_source") or "").strip()
+                if zh in forced_indices:
+                    slot_sp["chosen_index"] = forced_indices[zh]
+            return new_target, new_spans
+
+    new_target, new_spans = apply_glossary_with_spans(
+        translation,
+        source_text,
+        from_code,
+        to_code,
+        on_progress=on_progress,
+        forced_by_key=forced or None,
+    )
+    if ga.pos_bucket_for_option(new_option, to_code) == "verb":
+        try:
+            rewritten = gi.rewrite_esto_ot_for_verb_glossary(
+                new_target, new_option, to_code
+            )
+        except Exception:
+            rewritten = None
+        if rewritten and rewritten.strip() and rewritten != new_target:
+            new_target = rewritten.strip()
+            new_spans = find_glossary_spans_in_target(
+                source_text, new_target, from_code, to_code
+            )
+
+    for slot_sp in new_spans:
+        zh = (slot_sp.get("zh_source") or "").strip()
+        if zh in forced_indices:
+            slot_sp["chosen_index"] = forced_indices[zh]
+
+    return new_target, new_spans

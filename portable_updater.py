@@ -67,6 +67,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "setup_boot.py",
     "github_update.py",
     "update_dialog.py",
+    "version_history_dialog.py",
     "slavic_translation_hints.py",
     "slavic_translation_enhance.py",
     "slavic_to_zh_enhance.py",
@@ -216,9 +217,9 @@ def find_install_root(
     return None
 
 
-def collect_payload_files(payload_root: Path) -> list[Path]:
-    """列出 payload 目录中将要复制的文件（相对 payload_root）。"""
-    root = payload_root.resolve()
+def collect_managed_files(root: Path) -> list[Path]:
+    """列出安装/更新包中受管理的文件（相对 root）。"""
+    root = root.resolve()
     out: list[Path] = []
     seen: set[Path] = set()
     for rel in UPDATE_REL_PATHS:
@@ -248,6 +249,46 @@ def collect_payload_files(payload_root: Path) -> list[Path]:
     return sorted(out)
 
 
+def collect_payload_files(payload_root: Path) -> list[Path]:
+    """列出 payload 目录中将要复制的文件（相对 payload_root）。"""
+    return collect_managed_files(payload_root)
+
+
+def prune_stale_update_files(
+    payload_root: Path,
+    target_root: Path,
+    *,
+    on_progress: Callable[[str], None] | None = None,
+) -> tuple[int, list[str]]:
+    """
+    删除安装目录中不在目标版本包内的受管文件（用于降级或精确对齐版本）。
+    """
+    payload_root = payload_root.resolve()
+    target_root = target_root.resolve()
+    payload_files = set(collect_managed_files(payload_root))
+    installed_files = set(collect_managed_files(target_root))
+    stale = sorted(installed_files - payload_files)
+    errors: list[str] = []
+    removed = 0
+
+    def log(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
+
+    for rel in stale:
+        dst = target_root / rel
+        if not dst.is_file():
+            continue
+        log(f"移除 {rel}")
+        try:
+            dst.unlink()
+            removed += 1
+        except OSError as e:
+            errors.append(f"移除 {rel}: {e}")
+
+    return removed, errors
+
+
 def read_payload_version(payload_root: Path) -> str:
     data = read_version_json(payload_root)
     return str(data.get("version") or APP_VERSION)
@@ -263,6 +304,7 @@ def apply_update(
     target_root: Path,
     *,
     on_progress: Callable[[str], None] | None = None,
+    prune_stale: bool = True,
 ) -> tuple[int, list[str]]:
     """
     将 payload 复制到 target。返回 (复制文件数, 错误列表)。
@@ -323,6 +365,14 @@ def apply_update(
         ensure_runtime_python_deps(target_root)
     except ImportError:
         pass
+
+    if prune_stale:
+        removed, prune_errors = prune_stale_update_files(
+            payload_root, target_root, on_progress=log
+        )
+        count += removed
+        errors.extend(prune_errors)
+
     return count, errors
 
 

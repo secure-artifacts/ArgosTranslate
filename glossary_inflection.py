@@ -668,20 +668,22 @@ def suggest_predicate_adjective(lemma: str, lang_code: str) -> str | None:
 def infer_zh_glossary_role(zh_before: str, zh_after: str) -> str:
     """
     根据中文上下文推断术语语法角色。
-    predicate：别/不要/很… 等谓语位置；modifier：…的；object：其它。
+    predicate：别/不要/很… 等谓语位置；modifier：术语后接「的/地+中心词」；
+    object：句末宾语/表语（含「来自…的+名词」）。
     """
     before = (zh_before or "").strip()
     after = (zh_after or "").strip()
+    after_core = after.lstrip("。，,.!?；;… ")
     if _ZH_PREDICATE_BEFORE.search(before) or _ZH_DEGREE_BEFORE.search(before):
         return "predicate"
     if before.endswith("地") and not before.endswith("的"):
         return "adverb"
     if after.startswith("地") and len(after) > 1:
         return "adverb"
-    if after.startswith("的") or (after.startswith("地") and len(after) > 1):
+    if after.startswith("的"):
         return "modifier"
-    if before.endswith("的") or before.endswith("地"):
-        return "modifier"
+    if not after_core:
+        return "object"
     if before.endswith("是") or before.endswith("变得") or before.endswith("显得"):
         return "predicate"
     return "object"
@@ -885,6 +887,9 @@ def infer_glossary_role(
 ) -> str:
     """综合中文位置与译文上下文，判断术语应作谓语/定语/宾语。"""
     role = infer_zh_glossary_role(zh_before, zh_after)
+    zh_after_core = (zh_after or "").strip().lstrip("。，,.!?；;… ")
+    if not zh_after_core:
+        return role
     if role != "object":
         return role
     code = (lang_code or "").strip().lower()
@@ -925,31 +930,19 @@ def resolve_word_lemma_for_role(
     lang_code: str,
 ) -> tuple[str, str | None]:
     """
-    单词级：必要时名词→派生词（本地规则 / bkrs 单词查询），再按 pos 变格。
+    单词级：优先使用术语库原形及自身词性变格；不在此处派生。
+    派生仅在 inflect_glossary_term 变格失败后再尝试。
     """
     w = _enrich_word_analysis(dict(word))
     lemma = str(w.get("lemma") or w.get("surface") or "").strip()
     if not lemma:
         return "", None
-    code = (lang_code or "").strip().lower()
     pos = str(w.get("pos") or "").strip().upper()
+    pos_hint = _pos_hint_from_oc(pos)
     pred = str(w.get("pred_lemma") or w.get("derive_lemma") or "").strip()
-    if not pred and role in ("predicate", "modifier") and pos in ("", "NOUN"):
-        pred = suggest_predicate_adjective(lemma, code) or ""
-    if pred and role in ("predicate", "modifier"):
+    if pred and w.get("force_derive"):
         return pred, "adj"
-    if role in ("predicate", "modifier", "adverb"):
-        try:
-            import glossary_derivation as gd
-
-            picked = gd.pick_derivative_for_role(lemma, role, code)
-            if picked:
-                wl, hint = picked
-                if wl:
-                    return wl, hint or _pos_hint_from_oc(pos)
-        except Exception:
-            pass
-    return lemma, _pos_hint_from_oc(pos)
+    return lemma, pos_hint
 
 
 def resolve_term_lemma_for_context(
@@ -974,19 +967,40 @@ def resolve_term_lemma_for_context(
         target_after,
         code,
     )
+    if slot.get("lock_alternative"):
+        override = str(slot.get("glossary_role") or "").strip()
+        if override:
+            role = override
+        if not pos_hint:
+            try:
+                from glossary_manager import infer_pos_for_target
+
+                pos_hint = infer_pos_for_target(lemma, code)
+            except ImportError:
+                pass
+        if not words:
+            words = analyze_slavic_phrase(lemma, code).get("words") or []
+        return lemma, pos_hint, words, role
+    alternatives = slot.get("alternatives")
+    if isinstance(alternatives, list) and len(alternatives) > 1:
+        try:
+            import glossary_alternatives as ga
+
+            picked, _ = ga.pick_option_for_role(alternatives, code, role)
+            if picked:
+                lemma = picked.strip()
+                pos_hint = None
+                try:
+                    from glossary_manager import infer_pos_for_target
+
+                    pos_hint = infer_pos_for_target(lemma, code)
+                except ImportError:
+                    pass
+                words = analyze_slavic_phrase(lemma, code).get("words") or []
+        except ImportError:
+            pass
     if not words:
         words = analyze_slavic_phrase(lemma, code).get("words") or []
-    cyr_in_lemma = _word_re(code).findall(lemma)
-    single_word = len(words) <= 1 and len(cyr_in_lemma) <= 1
-
-    pred = str(slot.get("pred_lemma") or "").strip()
-    if not pred and single_word:
-        pred = suggest_predicate_adjective(lemma, code) or ""
-
-    if single_word and role in ("predicate", "modifier") and pred:
-        lemma = pred
-        pos_hint = "adj"
-        words = analyze_slavic_phrase(pred, code).get("words") or []
     return lemma, pos_hint, words, role
 
 
@@ -2510,11 +2524,17 @@ def _inflect_phrase_words(
             try:
                 import glossary_derivation as gd
 
-                got = gd.inflect_single_word_online_safe(
-                    wl, grammemes, code, pos_hint=wh or pos_hint
-                )
+                picked = gd.pick_derivative_for_role(wl, glossary_role, code)
+                if picked:
+                    d_lem, d_hint = picked
+                    if d_lem:
+                        got = _inflect_with_morph(
+                            morph, d_lem, grammemes, pos_hint=d_hint or wh or pos_hint
+                        )
+                        if got:
+                            wl = d_lem
             except Exception:
-                got = None
+                pass
         if not got and glossary_role in ("predicate", "modifier"):
             pred = suggest_predicate_adjective(wl, code)
             if pred and pred.casefold() != wl.casefold():
@@ -2638,9 +2658,15 @@ def inflect_glossary_term(
             try:
                 import glossary_derivation as gd
 
-                inflected = gd.inflect_single_word_online_safe(
-                    target, grams, code, pos_hint=wh or pos_hint
-                )
+                picked = gd.pick_derivative_for_role(target, glossary_role, code)
+                if picked:
+                    wl, wh = picked
+                    if wl:
+                        inflected = _inflect_with_morph(
+                            morph, wl, grams, pos_hint=wh or pos_hint
+                        )
+                        if inflected:
+                            target = wl
             except Exception:
                 pass
         if not inflected and glossary_role in ("predicate", "modifier"):
@@ -3180,3 +3206,144 @@ def slavic_morph_fix_enabled() -> bool:
     if v in ("0", "false", "no", "off"):
         return False
     return True
+
+
+_ESTO_OT_VERB_RE = re.compile(
+    r"^(?P<head>Это|это|Це|це)\s+(?:.+?\s+)?(?P<prep>от|від)\s+(?P<gen>.+?)(?P<punct>[.!?…]+)?$",
+    re.UNICODE,
+)
+
+
+def _nominative_from_genitive_token(token: str, morph) -> str:
+    tok = (token or "").strip()
+    if not tok:
+        return tok
+    if morph is None:
+        if tok.endswith("ей") and len(tok) > 3:
+            return tok[:-2] + "и"
+        if tok.endswith("ів") and len(tok) > 3:
+            return tok[:-2] + "і"
+        return tok
+    ps = morph.parse(tok)
+    if not ps:
+        return tok
+    best = max(ps, key=lambda p: p.score)
+    tag = str(best.tag)
+    grams: set[str] = {"nomn"}
+    if "plur" in tag:
+        grams.add("plur")
+    else:
+        grams.add("sing")
+    inf = best.inflect(grams)
+    if inf is not None:
+        return inf.word
+    nf = str(best.normal_form or tok).strip()
+    if nf and nf.casefold() != tok.casefold():
+        pn = morph.parse(nf)
+        if pn:
+            inf2 = max(pn, key=lambda p: p.score).inflect(grams)
+            if inf2 is not None:
+                return inf2.word
+    return tok
+
+
+def _nominative_subject_from_genitive_phrase(phrase: str, lang_code: str) -> str:
+    code = (lang_code or "").strip().lower()
+    morph = _morph_for_lang(code)
+    parts = [
+        _nominative_from_genitive_token(tok, morph)
+        for tok in _word_re(code).findall(phrase or "")
+    ]
+    return " ".join(parts)
+
+
+def _subject_grammatical_number(subject: str, lang_code: str) -> str:
+    code = (lang_code or "").strip().lower()
+    morph = _morph_for_lang(code)
+    words = _word_re(code).findall(subject or "")
+    if morph is None:
+        if len(words) > 1:
+            return "plur"
+        if len(words) == 1:
+            w = words[0].casefold()
+            if code == "uk":
+                if w.endswith(("и", "і", "ы", "а", "я")) and len(w) > 3:
+                    return "plur"
+            elif w.endswith(("и", "ы", "я")) and len(w) > 3:
+                return "plur"
+        return "sing"
+    for tok in words:
+        ps = morph.parse(tok)
+        if not ps:
+            continue
+        tag = str(max(ps, key=lambda p: p.score).tag)
+        if "plur" in tag:
+            return "plur"
+    return "sing"
+
+
+def _heuristic_verb_present_third(lemma: str, number: str) -> str:
+    lem = (lemma or "").strip()
+    if not lem:
+        return lem
+    plur = (number or "").strip().lower() == "plur"
+    if lem.endswith("ироваться"):
+        return lem[: -len("ироваться")] + ("ируются" if plur else "ируется")
+    if lem.endswith("ировать"):
+        return lem[: -len("ировать")] + ("ируют" if plur else "ирует")
+    if lem.endswith("аться"):
+        return lem[: -len("аться")] + ("аются" if plur else "ается")
+    if lem.endswith("ить"):
+        return lem[: -len("ить")] + ("ят" if plur else "ит")
+    if lem.endswith("ать"):
+        return lem[: -len("ать")] + ("ают" if plur else "ает")
+    if lem.endswith("еть"):
+        return lem[: -len("еть")] + ("ют" if plur else "ет")
+    if lem.endswith("ти"):
+        return lem[: -len("ти")] + ("ут" if plur else "ёт")
+    return lem
+
+
+def _verb_present_third_person(lemma: str, number: str, lang_code: str) -> str:
+    lem = (lemma or "").strip()
+    if not lem:
+        return lem
+    morph = _morph_for_lang(lang_code)
+    if morph is None:
+        return _heuristic_verb_present_third(lem, number)
+    parse = _pick_parse_for_lemma(morph, lem, pos_hint="verb")
+    if parse is None:
+        return _heuristic_verb_present_third(lem, number)
+    num = "plur" if (number or "").strip().lower() == "plur" else "sing"
+    inf = parse.inflect({"pres", num, "3per"})
+    if inf is not None:
+        return inf.word
+    return _heuristic_verb_present_third(lem, number)
+
+
+def rewrite_esto_ot_for_verb_glossary(
+    target: str, verb_lemma: str, lang_code: str
+) -> str | None:
+    """
+    「Это … от …」类表语结构在术语改为动词时，改写为主谓结构（主语 + 动词变位）。
+    例：Это дисциплина от родителей. → Родители дисциплинируют.
+    """
+    text = (target or "").strip()
+    m = _ESTO_OT_VERB_RE.match(text)
+    if not m:
+        return None
+    gen = (m.group("gen") or "").strip()
+    if not gen:
+        return None
+    subject = _nominative_subject_from_genitive_phrase(gen, lang_code)
+    if not subject:
+        return None
+    head = m.group("head") or ""
+    if head[:1].isupper() and subject[:1].islower():
+        subject = subject[0].upper() + subject[1:]
+    number = _subject_grammatical_number(subject, lang_code)
+    verb = _verb_present_third_person(verb_lemma, number, lang_code)
+    if not verb:
+        return None
+    punct = m.group("punct") or "."
+    return f"{subject} {verb}{punct}"

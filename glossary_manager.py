@@ -27,6 +27,28 @@ def _normalize_pos_import(raw_pos: str) -> str:
 
 _SKIP_INFER_POS = frozenset({"PREP", "CONJ", "PRCL", "INTJ"})
 
+_RU_INF_RE = re.compile(
+    r"^[а-яё\-]+(?:"
+    r"ть|ти|чь|"
+    r"ать|ять|еть|ить|уть|оть|ыть|"
+    r"аться|яться|еться|иться|уться|оться|ыться"
+    r")$",
+    re.I,
+)
+_RU_ADJ_RE = re.compile(r"^[а-яё\-]+(?:ый|ий|ая|ое|ые|ой|ого|ому|ым|ом|ую|ою|ой|их|им|ими)$", re.I)
+
+
+def _infer_pos_heuristic_ru(word: str) -> str | None:
+    """无 pymorphy2 时对单个俄语词形的粗判（原形/常见词尾）。"""
+    w = (word or "").strip().lower()
+    if not w or not re.fullmatch(r"[а-яё\-']+", w):
+        return None
+    if _RU_INF_RE.match(w):
+        return "verb"
+    if _RU_ADJ_RE.match(w):
+        return "adj"
+    return None
+
 # pymorphy2 初始化很重：批量导入时绝不可每行 new MorphAnalyzer()，否则界面长时间无响应。
 _morph_singleton: Any = False  # False=未尝试；None=不可用
 _morph_preload_lock = threading.Lock()
@@ -297,10 +319,14 @@ def infer_pos_from_russian(ru: str) -> str:
     多词时跳过前置词、连词等闭类，取第一个实词；无法分析时默认为名词。
     """
     morph = _shared_morph_analyzer()
-    if morph is None:
-        return "noun"
     tokens = re.findall(r"[А-Яа-яЁёA-Za-z-]+", (ru or "").strip())
     if not tokens:
+        return "noun"
+    if morph is None:
+        for w in tokens[:4]:
+            hint = _infer_pos_heuristic_ru(w)
+            if hint:
+                return hint
         return "noun"
     for w in tokens[:8]:
         try:
@@ -344,9 +370,27 @@ def _normalize_entry(prev: Any) -> dict[str, Any]:
 
 def infer_pos_for_target(target: str, target_lang: str) -> str:
     code = (target_lang or "").strip().lower()
-    if code in ("ru", "uk"):
-        return infer_pos_from_russian(target)
-    return "noun"
+    if code not in ("ru", "uk"):
+        return "noun"
+    opts: list[str]
+    try:
+        import glossary_alternatives as ga
+
+        opts = ga.list_all_options(target)
+    except ImportError:
+        opts = [(target or "").strip()]
+    if not opts:
+        return "noun"
+    buckets = [infer_pos_from_russian(opt) for opt in opts if (opt or "").strip()]
+    if not buckets:
+        return "noun"
+    unique = set(buckets)
+    if len(unique) == 1:
+        return buckets[0]
+    for pref in ("verb", "adj", "other", "noun"):
+        if pref in unique:
+            return pref
+    return buckets[0]
 
 
 def _entry_merge_target(
@@ -438,7 +482,7 @@ class GlossaryStore:
         entry[target_lang] = new_val
         if pos is not None and str(pos).strip() != "":
             entry["pos"] = _normalize_pos_import(str(pos))
-        elif not light and target_lang in ("ru", "uk"):
+        elif target_lang in ("ru", "uk"):
             entry["pos"] = infer_pos_for_target(target, target_lang)
         self._data[source] = entry
         return self

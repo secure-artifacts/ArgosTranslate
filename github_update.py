@@ -36,6 +36,7 @@ class ReleaseInfo:
     zip_url: str
     zip_name: str
     zip_size: int
+    published_at: str = ""
 
 
 def _read_settings_key(key: str) -> str:
@@ -118,6 +119,36 @@ def _pick_zip_asset(assets: list[dict[str, Any]]) -> dict[str, Any] | None:
     return None
 
 
+def _release_from_api(
+    data: dict[str, Any],
+    repo: str,
+    *,
+    include_prerelease: bool = True,
+) -> ReleaseInfo | None:
+    if data.get("draft"):
+        return None
+    if data.get("prerelease") and not include_prerelease:
+        return None
+    tag = str(data.get("tag_name") or "").strip()
+    if not tag:
+        return None
+    asset = _pick_zip_asset(data.get("assets") or [])
+    if asset is None:
+        return None
+    version = _version_from_tag(tag)
+    return ReleaseInfo(
+        tag=tag,
+        version=version,
+        name=str(data.get("name") or tag),
+        html_url=str(data.get("html_url") or f"https://github.com/{repo}/releases"),
+        body=str(data.get("body") or "").strip(),
+        zip_url=str(asset.get("browser_download_url") or ""),
+        zip_name=str(asset.get("name") or ""),
+        zip_size=int(asset.get("size") or 0),
+        published_at=str(data.get("published_at") or ""),
+    )
+
+
 def fetch_latest_release(
     repo: str | None = None,
     *,
@@ -139,23 +170,54 @@ def fetch_latest_release(
     if data.get("prerelease") and not include_prerelease:
         pass  # /latest 通常已是稳定版
 
-    tag = str(data.get("tag_name") or "")
-    version = _version_from_tag(tag)
-    asset = _pick_zip_asset(data.get("assets") or [])
-    if asset is None:
+    rel = _release_from_api(data, repo, include_prerelease=True)
+    if rel is None:
+        tag = str(data.get("tag_name") or "")
         raise RuntimeError(
             f"Release {tag} 中未找到程序更新 zip（ArgosTranslate-vX.Y.Z.zip）。"
         )
-    return ReleaseInfo(
-        tag=tag,
-        version=version,
-        name=str(data.get("name") or tag),
-        html_url=str(data.get("html_url") or f"https://github.com/{repo}/releases"),
-        body=str(data.get("body") or "").strip(),
-        zip_url=str(asset.get("browser_download_url") or ""),
-        zip_name=str(asset.get("name") or ""),
-        zip_size=int(asset.get("size") or 0),
-    )
+    return rel
+
+
+def fetch_all_releases(
+    repo: str | None = None,
+    *,
+    include_prerelease: bool = False,
+    max_pages: int = 5,
+) -> list[ReleaseInfo]:
+    """获取 GitHub Releases 列表（含历史版本），按版本号从新到旧排序。"""
+    repo = (repo or github_repo()).strip()
+    out: list[ReleaseInfo] = []
+    page = 1
+    while page <= max_pages:
+        url = (
+            f"https://api.github.com/repos/{repo}/releases"
+            f"?per_page=100&page={page}"
+        )
+        try:
+            data = _api_request(url)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise RuntimeError(f"仓库未找到或未发布 Release：{repo}") from e
+            raise RuntimeError(f"无法访问 GitHub（HTTP {e.code}）") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"网络错误，无法获取版本列表：{e.reason}") from e
+        if not isinstance(data, list) or not data:
+            break
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            rel = _release_from_api(
+                item, repo, include_prerelease=include_prerelease
+            )
+            if rel is not None:
+                out.append(rel)
+        if len(data) < 100:
+            break
+        page += 1
+
+    out.sort(key=lambda r: compare_versions(r.version, "0.0.0"), reverse=True)
+    return out
 
 
 def installed_version(install_root: Path | None = None) -> str:
@@ -254,8 +316,14 @@ def download_and_apply_release(
         raise RuntimeError("未找到有效安装目录，请先在「安装位置」完成安装。")
 
     old_ver = read_installed_version(root)
-    if not force and compare_versions(release.version, old_ver) <= 0:
-        raise RuntimeError(f"当前版本 {old_ver} 不低于 {release.version}，无需更新。")
+    if not force:
+        if compare_versions(release.version, old_ver) == 0:
+            raise RuntimeError(f"当前已是 {old_ver}，无需重复安装。")
+        if compare_versions(release.version, old_ver) < 0:
+            raise RuntimeError(
+                f"目标版本 {release.version} 低于当前 {old_ver}。"
+                "请使用「历史版本」进行降级安装。"
+            )
 
     def log(msg: str) -> None:
         if progress:
@@ -269,7 +337,11 @@ def download_and_apply_release(
         log("正在解压更新包…")
         payload = extract_update_zip(zip_path, work)
         log(f"正在安装到 {root}…")
-        count, errors = apply_update(payload, root, on_progress=progress)
+        if force and compare_versions(release.version, old_ver) < 0:
+            log("正在清理较新版本新增的文件…")
+        count, errors = apply_update(
+            payload, root, on_progress=progress, prune_stale=True
+        )
         new_ver = read_installed_version(root)
         return count, errors, old_ver, new_ver
     finally:

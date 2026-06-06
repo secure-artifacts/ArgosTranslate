@@ -1227,6 +1227,10 @@ class GUIWindow(QMainWindow):
         )
         self.check_update_action = self.menu.addAction("检查更新…")
         self.check_update_action.triggered.connect(self.check_update_action_triggered)
+        self.version_history_action = self.menu.addAction("历史版本…")
+        self.version_history_action.triggered.connect(
+            self.version_history_action_triggered
+        )
         self.about_action = self.menu.addAction("关于")
         self.about_action.triggered.connect(self.about_action_triggered)
         self.menu.setNativeMenuBar(False)
@@ -1287,6 +1291,17 @@ class GUIWindow(QMainWindow):
                 self._chrome_update_btn.clicked.connect(
                     self.check_update_action_triggered
                 )
+            self._chrome_version_history_btn = None
+            if (self._portable_root / "version_history_dialog.py").is_file():
+                self._chrome_version_history_btn = QToolButton()
+                self._chrome_version_history_btn.setObjectName("ChromeBtn")
+                self._chrome_version_history_btn.setText("历史版本")
+                self._chrome_version_history_btn.setToolTip(
+                    "选择并安装任意历史版本（支持降级）"
+                )
+                self._chrome_version_history_btn.clicked.connect(
+                    self.version_history_action_triggered
+                )
             self._chrome_about_btn = QToolButton()
             self._chrome_about_btn.setObjectName("ChromeBtn")
             self._chrome_about_btn.setText("关于")
@@ -1303,6 +1318,8 @@ class GUIWindow(QMainWindow):
                 ch_l.addWidget(self._chrome_notebook_btn)
             if self._chrome_update_btn is not None:
                 ch_l.addWidget(self._chrome_update_btn)
+            if self._chrome_version_history_btn is not None:
+                ch_l.addWidget(self._chrome_version_history_btn)
             ch_l.addWidget(self._chrome_about_btn)
             ch_l.addWidget(self._chrome_dark_btn)
             self.window_layout.addWidget(chrome)
@@ -1690,6 +1707,14 @@ class GUIWindow(QMainWindow):
             QMessageBox.warning(self, "检查更新", "未找到 update_dialog.py。")
             return
         ud.open_update_dialog(self)
+
+    def version_history_action_triggered(self):
+        try:
+            import version_history_dialog as vhd
+        except ImportError:
+            QMessageBox.warning(self, "历史版本", "未找到 version_history_dialog.py。")
+            return
+        vhd.open_version_history_dialog(self)
 
     def open_glossary_editor(self):
         mod = _import_glossary_editor_module()

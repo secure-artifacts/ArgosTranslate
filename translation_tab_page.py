@@ -338,6 +338,10 @@ class TranslationTabPage(QWidget):
         self.left_textEdit.textChanged.connect(self._schedule_translate_debounce)
 
         self.right_textEdit = GlossaryTargetTranslationTextEdit()
+        if hasattr(self.right_textEdit, "set_glossary_swap_handler"):
+            self.right_textEdit.set_glossary_swap_handler(
+                self._on_glossary_alternative_swap
+            )
         if root is not None and _fast_startup_enabled():
             _tgt_ph = "译文"
         else:
@@ -756,6 +760,7 @@ class TranslationTabPage(QWidget):
         *,
         tb,
         bm,
+        use_glossary: bool = False,
     ) -> str:
         try:
             import argos_quality_guard as aqg
@@ -771,6 +776,32 @@ class TranslationTabPage(QWidget):
                 bm=bm,
             )
 
+        glossary_fn = None
+        if (
+            use_glossary
+            and tb is not None
+            and hasattr(tb, "translate_with_glossary_slots")
+        ):
+            try:
+                if tb.should_apply_glossary(from_code, to_code):
+
+                    def _glossary_translate(src: str) -> str:
+                        import argos_translation_quality as atq
+
+                        raw, _ = tb.translate_with_glossary_slots(
+                            translation,
+                            src,
+                            from_code,
+                            to_code,
+                        )
+                        return atq.postprocess_zh_slavic_output(
+                            raw, src, from_code, to_code
+                        )
+
+                    glossary_fn = _glossary_translate
+            except Exception:
+                glossary_fn = None
+
         out = aqg.ensure_quality(
             result,
             source_text,
@@ -778,6 +809,7 @@ class TranslationTabPage(QWidget):
             to_code,
             translation,
             prepare_fn=prepare,
+            glossary_translate_fn=glossary_fn,
         )
         try:
             from slavic_translation_hints import is_zh_to_slavic
@@ -976,6 +1008,7 @@ class TranslationTabPage(QWidget):
             translation,
             tb=tb,
             bm=bm,
+            use_glossary=use_glossary,
         )
         already = bool(getattr(self, "_target_postprocess_done", False))
         result = postprocess_target_text_for_codes(
@@ -2206,6 +2239,43 @@ class TranslationTabPage(QWidget):
         self.right_textEdit.setPlainText(msg)
         self.right_textEdit.blockSignals(False)
         self._update_char_counts()
+
+    def _on_glossary_alternative_swap(
+        self,
+        span_index: int,
+        option_index: int,
+        spans: list,
+    ) -> tuple[str | None, list | None]:
+        """术语切换为不同词性时，整句重译并调整句法。"""
+        li = self.left_language_combo.currentIndex()
+        ri = self.right_language_combo.currentIndex()
+        L = self._language_at_combo_index(li)
+        R = self._language_at_combo_index(ri)
+        if L is None or R is None:
+            return None, None
+        _, _, translation = self._ensure_translation_engine_ready(L, R)
+        if translation is None:
+            return None, None
+        fc = (getattr(L, "code", None) or "").strip().lower()
+        tc = (getattr(R, "code", None) or "").strip().lower()
+        source = self.left_textEdit.toPlainText() or ""
+        if not source.strip():
+            return None, None
+        try:
+            import terminology_bridge as tb
+
+            return tb.swap_glossary_alternative_in_target(
+                source,
+                self.right_textEdit.toPlainText() or "",
+                spans,
+                span_index,
+                option_index,
+                fc,
+                tc,
+                translation,
+            )
+        except Exception:
+            return None, None
 
     def update_right_textEdit(self, text: str) -> None:
         if self._segmented_mode:
