@@ -140,5 +140,5 @@ def missing_install_message(attempted_root: Path) -> str:
         "请从 GitHub Releases 下载 ArgosTranslate-vX.Y.Z.exe（只需 exe，无需 zip）：\n"
         "  双击后选择安装文件夹，程序会自动完成配置。\n\n"
         f"安装成功后路径记录在：{pointer}\n"
-        "可在软件菜单「安装位置…」中更改。"
+        "可在软件顶栏「安装位置」或「检查更新 → 安装位置…」中查看与更改。"
     )

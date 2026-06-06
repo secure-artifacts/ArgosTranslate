@@ -102,7 +102,11 @@ class UpdateDialog(QDialog):
         row.addWidget(self._btn_check)
         self._btn_history = QPushButton("历史版本…")
         self._btn_history.clicked.connect(self._on_history)
+        self._btn_install_loc = QPushButton("安装位置…")
+        self._btn_install_loc.setToolTip("查看或更改程序安装文件夹")
+        self._btn_install_loc.clicked.connect(self._on_install_location)
         row.addWidget(self._btn_history)
+        row.addWidget(self._btn_install_loc)
         row.addWidget(self._btn_apply)
         row.addWidget(self._btn_release)
         layout.addLayout(row)
@@ -117,6 +121,7 @@ class UpdateDialog(QDialog):
     def _set_busy(self, busy: bool) -> None:
         self._btn_check.setEnabled(not busy)
         self._btn_history.setEnabled(not busy)
+        self._btn_install_loc.setEnabled(not busy)
         can_apply = False
         if not busy and self._release is not None:
             from app_version import compare_versions
@@ -137,6 +142,25 @@ class UpdateDialog(QDialog):
             QMessageBox.warning(self, "历史版本", "未找到 version_history_dialog.py。")
             return
         vhd.open_version_history_dialog(self)
+
+    def _refresh_install_info(self) -> None:
+        root = find_portable_root()
+        loc = str(root) if is_install_root(root) else "（未检测到安装目录）"
+        self._lbl_info.setText(
+            f"{APP_NAME}\n"
+            f"当前版本：{installed_version(root)}\n"
+            f"更新源：GitHub {github_repo()}\n"
+            f"安装目录：{loc}"
+        )
+
+    def _on_install_location(self) -> None:
+        try:
+            import install_location_dialog as ild
+        except ImportError:
+            QMessageBox.warning(self, "安装位置", "未找到 install_location_dialog.py。")
+            return
+        ild.open_install_location_dialog(self)
+        self._refresh_install_info()
 
     def _on_apply(self) -> None:
         if self._release is None:

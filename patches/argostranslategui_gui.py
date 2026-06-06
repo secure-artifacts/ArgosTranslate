@@ -1302,6 +1302,15 @@ class GUIWindow(QMainWindow):
                 self._chrome_version_history_btn.clicked.connect(
                     self.version_history_action_triggered
                 )
+            self._chrome_install_btn = QToolButton()
+            self._chrome_install_btn.setObjectName("ChromeBtn")
+            self._chrome_install_btn.setText("安装位置")
+            self._chrome_install_btn.setToolTip(
+                "查看当前安装文件夹，或更改到新路径"
+            )
+            self._chrome_install_btn.clicked.connect(
+                self.install_location_action_triggered
+            )
             self._chrome_about_btn = QToolButton()
             self._chrome_about_btn.setObjectName("ChromeBtn")
             self._chrome_about_btn.setText("关于")
@@ -1320,6 +1329,7 @@ class GUIWindow(QMainWindow):
                 ch_l.addWidget(self._chrome_update_btn)
             if self._chrome_version_history_btn is not None:
                 ch_l.addWidget(self._chrome_version_history_btn)
+            ch_l.addWidget(self._chrome_install_btn)
             ch_l.addWidget(self._chrome_about_btn)
             ch_l.addWidget(self._chrome_dark_btn)
             self.window_layout.addWidget(chrome)
@@ -1751,10 +1761,9 @@ class GUIWindow(QMainWindow):
             ver = data.get("version") or ver_mod.APP_VERSION
             extra = (
                 f"\n\n{ver_mod.APP_NAME} 便携版 {ver}\n"
-                f"安装目录：{self._portable_root}\n\n"
-                f"更新方式：下载新版「{ver_mod.APP_NAME}-x.y.z-更新.exe」，双击运行；"
-                "程序会自动覆盖程序文件并保留 data（语言包、术语库、语音模型等），"
-                "完成后启动翻译界面。首次会提示选择安装文件夹，之后会记住路径。"
+                f"安装目录：{self._portable_root}\n"
+                "（顶栏「安装位置」可查看、复制或更改路径）\n\n"
+                f"更新方式：软件内「检查更新」，或下载新版安装 exe。"
             )
         about_message_box.setText(base + extra)
         about_message_box.setIcon(QMessageBox.Information)
