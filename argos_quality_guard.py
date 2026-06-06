@@ -243,6 +243,22 @@ def ensure_quality(
     except ImportError:
         return target_text or ""
 
+    try:
+        import argos_inference_tuning as ait
+
+        if (
+            ait.is_ultra_short_text(source_text)
+            and is_zh_to_slavic(from_code, to_code)
+        ):
+            return atq.postprocess_zh_slavic_ultra_short(
+                target_text or "",
+                source_text,
+                from_code,
+                to_code,
+            )
+    except ImportError:
+        pass
+
     base_pp = atq.postprocess_zh_slavic_output(
         target_text or "",
         source_text,

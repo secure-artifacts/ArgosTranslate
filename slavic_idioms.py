@@ -208,6 +208,17 @@ _CALQUES_RU: dict[str, list[str]] = {
     "哈利路亚": ["аллилуйя", "аллилуia"],
     "牧师": ["священнослужитель", "священник"],
     "神父": ["священнослужитель"],
+    # 问候（你好 ≠ 下午好/Добрый день）
+    "你好": [
+        "добрый день",
+        "доброго день",
+        "доброго дня",
+        "доброе утро",
+        "добрый вечер",
+        "доброго утра",
+        "доброго вечера",
+    ],
+    "您好": ["добрый день", "доброго день"],
     "圣母": ["дева мария"],
     "领圣餐": ["принимать communion", "принимать причастие"],
     "主祷文": ["молитва отца нашего", "отче наш"],
@@ -260,6 +271,13 @@ _CALQUES_UK: dict[str, list[str]] = {
     "复活节": ["великодній свят"],
     "哈利路亚": ["аллелуia", "аллілуia"],
     "牧师": ["пастор"],
+    "你好": [
+        "добрий день",
+        "доброго дня",
+        "доброго день",
+        "доброго ранку",
+        "доброго вечора",
+    ],
 }
 
 
@@ -1526,6 +1544,136 @@ def _apply_zh_household_vocab_repairs(
     return t
 
 
+def _normalize_zh_greeting_source(text: str) -> str:
+    s = (text or "").strip()
+    return s.strip(" \t\r\n。！？!?.,，、…")
+
+
+_ZH_GREETING_TARGETS: dict[str, dict[str, str]] = {
+    "ru": {
+        "你好": "Привет",
+        "您好": "Здравствуйте",
+        "早上好": "Доброе утро",
+        "上午好": "Доброе утро",
+        "下午好": "Добрый день",
+        "晚上好": "Добрый вечер",
+        "晚安": "Спокойной ночи",
+        "再见": "До свидания",
+        "谢谢": "Спасибо",
+        "多谢": "Спасибо",
+        "对不起": "Извините",
+        "不好意思": "Извините",
+    },
+    "uk": {
+        "你好": "Привіт",
+        "您好": "Вітаю",
+        "早上好": "Доброго ранку",
+        "上午好": "Доброго ранку",
+        "下午好": "Добрий день",
+        "晚上好": "Доброго вечора",
+        "晚安": "На добраніч",
+        "再见": "До побачення",
+        "谢谢": "Дякую",
+        "多谢": "Дякую",
+        "对不起": "Вибачте",
+        "不好意思": "Вибачте",
+    },
+}
+
+_GREETING_TRAIL_PUNCT_RE = re.compile(r"([。！？!?…\.]+)\s*$")
+
+
+def _zh_greeting_end_punct(source_text: str) -> str:
+    """从中文问候原文取句末标点，不额外添加感叹号。"""
+    raw = (source_text or "").strip()
+    m = _GREETING_TRAIL_PUNCT_RE.search(raw)
+    if not m:
+        return ""
+    chars = m.group(1)
+    if "！" in chars or "!" in chars:
+        return "!"
+    if "？" in chars or "?" in chars:
+        return "?"
+    if "。" in chars or "…" in chars or "." in chars:
+        return "."
+    return ""
+
+
+def _greeting_with_source_punct(base: str, source_text: str) -> str:
+    phrase = (base or "").strip().rstrip("!.?…")
+    if not phrase:
+        return phrase
+    punct = _zh_greeting_end_punct(source_text)
+    return phrase + punct if punct else phrase
+
+
+def _greeting_base_matched(target_text: str, base: str) -> bool:
+    t = re.sub(r"[!.?.…]+$", "", (target_text or "").strip()).casefold()
+    b = (base or "").strip().casefold()
+    if not t or not b:
+        return False
+    n = max(4, min(len(b), 8))
+    return t.startswith(b[:n]) or b.startswith(t[:n])
+
+_NIHAO_DAYTIME_WRONG_RU = re.compile(
+    r"(?i)^\s*добр\w*\s+(?:день|дня|утр\w*|вечер\w*)"
+)
+_NIHAO_DAYTIME_WRONG_UK = re.compile(
+    r"(?i)^\s*добр\w*\s+(?:день|дня|ранк\w*|вечор\w*)"
+)
+
+
+def ultra_short_zh_slavic_direct(source_text: str, target_lang: str) -> str | None:
+    """
+    极短常用语直连译文（不经 Argos 模型），如 你好→Привет。
+    未收录时返回 None，仍走常规模型翻译。
+    """
+    src = _normalize_zh_greeting_source(source_text)
+    code = (target_lang or "").strip().lower()
+    table = _ZH_GREETING_TARGETS.get(code)
+    if not src or not table:
+        return None
+    base = table.get(src)
+    if not base:
+        return None
+    return _greeting_with_source_punct(base, source_text)
+
+
+def apply_zh_greeting_fix(
+    source_text: str,
+    target_text: str,
+    target_lang: str,
+) -> str:
+    """
+    常见问候语整句修正：你好 → Привет，不是 Добрый/Доброго день（下午好）。
+    在变格后处理之后调用，避免 добрый → доброго 误改。
+    """
+    if not slavic_idiom_fix_enabled():
+        return target_text
+    src = _normalize_zh_greeting_source(source_text)
+    code = (target_lang or "").strip().lower()
+    table = _ZH_GREETING_TARGETS.get(code)
+    if not src or not table:
+        return target_text
+    expected = table.get(src)
+    if not expected:
+        return target_text
+    base = expected.strip()
+    finalized = _greeting_with_source_punct(base, source_text)
+    t = (target_text or "").strip()
+    if not t:
+        return finalized
+    if _greeting_base_matched(t, base):
+        return finalized
+    if src == "你好":
+        wrong = _NIHAO_DAYTIME_WRONG_RU if code == "ru" else _NIHAO_DAYTIME_WRONG_UK
+        if wrong.search(t):
+            return finalized
+    if len(src) <= 8:
+        return finalized
+    return target_text
+
+
 def _apply_zh_colloquial_mt_repairs(
     source_text: str,
     target_text: str,
@@ -1718,6 +1866,7 @@ def apply_idiom_fixes(
         t = apply_zh_predicative_copula_repairs(source_text, t, lang)
         t = apply_zh_person_trait_repairs(source_text, t, lang)
         t = apply_target_collocation_fixes(t, lang)
+        t = apply_zh_greeting_fix(source_text, t, lang)
     return t
 
 

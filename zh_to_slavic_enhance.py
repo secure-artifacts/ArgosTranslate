@@ -115,13 +115,20 @@ def postprocess_zh_to_slavic(
     except ImportError:
         pass
 
-    # 母语润色：collocation → style rerank → anti-MT
+    # 母语润色：collocation → style rerank → anti-MT（极短句跳过）
     try:
-        from native_fluency_pipeline import post_edit_native
+        import argos_inference_tuning as ait
 
-        t = post_edit_native(t, lang, source_text=src)
+        ultra = ait.is_ultra_short_text(src)
     except ImportError:
-        pass
+        ultra = len((src or "").strip()) <= 16
+    if not ultra:
+        try:
+            from native_fluency_pipeline import post_edit_native
+
+            t = post_edit_native(t, lang, source_text=src)
+        except ImportError:
+            pass
 
     try:
         import slavic_idioms as si

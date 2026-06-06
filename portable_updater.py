@@ -36,6 +36,7 @@ UPDATE_REL_PATHS: tuple[str, ...] = (
     "bulk_text.py",
     "glossary_editor.py",
     "glossary_inflection.py",
+    "glossary_derivation.py",
     "slavic_grammar_rules.py",
     "slavic_idioms.py",
     "slavic_advanced_morph.py",

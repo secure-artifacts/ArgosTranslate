@@ -28,6 +28,15 @@ def is_short_text(text: str) -> bool:
     return len(t) < 120 and t.count("\n") < 2
 
 
+def is_ultra_short_text(text: str) -> bool:
+    """极短句（如「你好」「谢谢」）：优先速度，跳过重型后处理/重译。"""
+    t = (text or "").strip()
+    if not t or "\n" in t:
+        return False
+    cjk = _cjk_char_count(t)
+    return cjk <= 8 and len(t) <= 16
+
+
 def text_tier(text: str) -> str:
     """short | medium | long — 用于推理与后处理分级。"""
     t = (text or "").strip()
@@ -42,6 +51,8 @@ def text_tier(text: str) -> str:
 def _short_decoding_tokens(text: str) -> int:
     """短句解码上限：按源语长度估算，避免俄/乌尾句被截断。"""
     t = (text or "").strip()
+    if is_ultra_short_text(t):
+        return max(48, min(96, 32 + _cjk_char_count(t) * 8 + len(t) * 2))
     cjk = _cjk_char_count(t)
     plain = len(t)
     est = 128 + cjk * 12 + plain * 2
@@ -61,11 +72,13 @@ def debounce_ms_for_char_count(chars: int, *, block_count: int = 1) -> int:
     """按字数估算去抖（避免每次按键 toPlainText 全量扫描）。"""
     n = max(0, int(chars))
     nl = max(1, int(block_count))
+    if n <= 4 and nl < 2:
+        return 50
     if n < 120 and nl < 2:
-        return 450
+        return 280
     if n < 260 and nl < 4:
-        return 800
-    return 1200
+        return 700
+    return 1100
 
 
 def _scaled_max_decoding_tokens(text: str, saved: dict[str, object]) -> int:
@@ -117,6 +130,15 @@ def apply_for_input(text: str) -> None:
     saved = _ensure_saved()
     tier = text_tier(text)
 
+    if is_ultra_short_text(text):
+        s.beam_size = 1
+        s.max_decoding_tokens = _short_decoding_tokens(text)
+        s.beam_patience = 1.0
+        s.coverage_penalty = max(0.01, float(saved["coverage_penalty"]))
+        s.length_penalty = max(0.32, float(saved["length_penalty"]))
+        s.repetition_penalty = max(1.0, float(saved["repetition_penalty"]))
+        return
+
     if tier == "short":
         base_beam = int(saved["beam_size"]) if int(saved["beam_size"]) > 0 else 4
         s.beam_size = min(4, max(3, base_beam))
@@ -162,6 +184,8 @@ def apply_for_slavic_pair(text: str, from_code: str, to_code: str) -> None:
     import argostranslate.settings as s
 
     saved = _ensure_saved()
+    if is_ultra_short_text(text):
+        return
     tier = text_tier(text)
     if tier == "short":
         base_beam = int(saved["beam_size"]) if int(saved["beam_size"]) > 0 else 5

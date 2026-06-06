@@ -38,6 +38,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QShortcut,
     QSizePolicy,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -103,6 +104,488 @@ def _normalize_pos(raw_pos: str) -> str:
     if value in {"other", "phrase", "短语", "其他"}:
         return "other"
     return "noun"
+
+
+ROLE_WORD_META = Qt.UserRole + 42
+
+_POS_OC_ZH: dict[str, str] = {
+    "NOUN": "名词",
+    "VERB": "动词",
+    "INFN": "动词",
+    "GRND": "动词",
+    "PRTF": "分词",
+    "PRTS": "分词",
+    "ADJF": "形容词",
+    "ADJS": "形容词",
+    "ADVB": "副词",
+    "NPRO": "代词",
+    "NUMR": "数词",
+    "PREP": "介词",
+    "CONJ": "连词",
+    "PRCL": "语气词",
+    "INTJ": "感叹词",
+}
+
+_POS_EDIT_CHOICES = [
+    "名词",
+    "动词",
+    "形容词",
+    "副词",
+    "代词",
+    "数词",
+    "介词",
+    "连词",
+    "分词",
+    "语气词",
+    "其它",
+]
+
+_POS_LABEL_TO_OC: dict[str, str] = {
+    "名词": "NOUN",
+    "动词": "VERB",
+    "形容词": "ADJF",
+    "副词": "ADVB",
+    "代词": "NPRO",
+    "数词": "NUMR",
+    "介词": "PREP",
+    "连词": "CONJ",
+    "分词": "PRTF",
+    "语气词": "PRCL",
+    "其它": "OTHER",
+    "其他": "OTHER",
+}
+
+_CASE_EDIT_CHOICES = [
+    "—",
+    "主格",
+    "属格",
+    "与格",
+    "宾格",
+    "工具格",
+    "前置格",
+    "呼格",
+]
+
+_NUMBER_EDIT_CHOICES = ["—", "单数", "复数"]
+
+_CASE_ZH_TO_OC: dict[str, str] = {
+    "主格": "nomn",
+    "属格": "gent",
+    "与格": "datv",
+    "宾格": "accs",
+    "工具格": "ablt",
+    "前置格": "loct",
+    "呼格": "voct",
+}
+
+_NUMBER_ZH_TO_OC: dict[str, str] = {
+    "单数": "sing",
+    "复数": "plur",
+}
+
+_OC_CASES = frozenset(_CASE_ZH_TO_OC.values())
+_OC_NUMBER = frozenset(_NUMBER_ZH_TO_OC.values())
+_OC_TO_CASE_ZH = {v: k for k, v in _CASE_ZH_TO_OC.items()}
+_OC_TO_NUMBER_ZH = {v: k for k, v in _NUMBER_ZH_TO_OC.items()}
+
+_ENTRY_POS_CHOICES = ("名词", "动词", "形容词", "其他")
+
+
+def _pos_supports_word_columns(tgt_lang: str) -> bool:
+    return (tgt_lang or "").strip().lower() in ("ru", "uk")
+
+
+def _pos_oc_to_zh(pos_oc: str) -> str:
+    p = (pos_oc or "").strip().upper()
+    return _POS_OC_ZH.get(p, p or "—")
+
+
+def _pos_zh_to_oc(label: str) -> str:
+    t = (label or "").strip()
+    if t in _POS_LABEL_TO_OC:
+        return _POS_LABEL_TO_OC[t]
+    upper = t.upper()
+    if upper in _POS_OC_ZH:
+        return upper
+    return ""
+
+
+def _bucket_to_zh(bucket: str) -> str:
+    return {
+        "noun": "名词",
+        "verb": "动词",
+        "adj": "形容词",
+        "other": "其他",
+    }.get((bucket or "").strip().lower(), "名词")
+
+
+def _analyze_row_words(text: str, lang: str) -> list[dict[str, Any]]:
+    try:
+        import glossary_inflection as gi
+
+        return list(gi.analyze_slavic_phrase(text, lang).get("words") or [])
+    except Exception:
+        return []
+
+
+def _merge_words_with_overrides(
+    auto_words: list[dict[str, Any]],
+    overrides: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    if not overrides:
+        return [dict(w) for w in auto_words]
+    if len(overrides) != len(auto_words):
+        return [dict(w) for w in auto_words]
+    out: list[dict[str, Any]] = []
+    for i, aw in enumerate(auto_words):
+        w = dict(aw)
+        ov = overrides[i]
+        if not isinstance(ov, dict):
+            out.append(w)
+            continue
+        ov_surf = (ov.get("surface") or ov.get("lemma") or "").strip().casefold()
+        aw_surf = (aw.get("surface") or aw.get("lemma") or "").strip().casefold()
+        if ov_surf and aw_surf and ov_surf != aw_surf:
+            out.append(w)
+            continue
+        ov_pos = (ov.get("pos") or "").strip()
+        if ov_pos:
+            w["pos"] = ov_pos
+        for key in ("case", "case_zh", "number", "number_zh", "grammemes"):
+            if key in ov:
+                w[key] = ov[key]
+        out.append(w)
+    return out
+
+
+def _word_pos_summary_chunk(w: dict[str, Any]) -> str:
+    try:
+        import glossary_inflection as gi
+
+        w = gi._enrich_word_analysis(dict(w))
+    except Exception:
+        w = dict(w)
+    surf = (w.get("surface") or w.get("lemma") or "?").strip()
+    tags: list[str] = []
+    pos_label = _pos_oc_to_zh(str(w.get("pos") or ""))
+    if pos_label and pos_label != "—":
+        tags.append(pos_label)
+    case_zh = (w.get("case_zh") or "").strip()
+    if case_zh and case_zh not in ("—", "-"):
+        tags.append(case_zh)
+    num_zh = (w.get("number_zh") or w.get("number") or "").strip()
+    if num_zh in ("sing", "plur"):
+        num_zh = {"sing": "单数", "plur": "复数"}.get(num_zh, num_zh)
+    if num_zh and num_zh not in ("—", "-"):
+        tags.append(num_zh)
+    if tags:
+        return f"{surf}({'·'.join(tags)})"
+    return surf
+
+
+def _words_pos_summary(words: list[dict[str, Any]]) -> str:
+    if not words:
+        return "—"
+    return "; ".join(_word_pos_summary_chunk(w) for w in words)
+
+
+def _words_pos_export_detail(words: list[dict[str, Any]]) -> str:
+    if not words:
+        return ""
+    parts: list[str] = []
+    for w in words:
+        surf = (w.get("surface") or w.get("lemma") or "").strip()
+        lemma = (w.get("lemma") or surf).strip()
+        pos_label = _pos_oc_to_zh(str(w.get("pos") or ""))
+        case_zh = (w.get("case_zh") or w.get("case") or "").strip()
+        num_zh = (w.get("number_zh") or w.get("number") or "").strip()
+        chunk = f"{surf}|{lemma}|{pos_label}"
+        if case_zh:
+            chunk += f"|{case_zh}"
+        if num_zh:
+            chunk += f"|{num_zh}"
+        parts.append(chunk)
+    return " ; ".join(parts)
+
+
+def _apply_words_to_target_val(
+    val: Any,
+    words: list[dict[str, Any]] | None,
+    *,
+    surface: str = "",
+    lang: str = "",
+) -> Any:
+    if not words or not isinstance(val, dict):
+        return val
+    out = dict(val)
+    stored_words: list[dict[str, Any]] = []
+    for w in words:
+        if not isinstance(w, dict):
+            continue
+        stored_words.append(
+            {
+                "surface": w.get("surface", ""),
+                "lemma": w.get("lemma", ""),
+                "grammemes": w.get("grammemes") or [],
+                "case": w.get("case", ""),
+                "case_zh": w.get("case_zh", ""),
+                "number": w.get("number", ""),
+                "number_zh": w.get("number_zh", ""),
+                "pos": w.get("pos", ""),
+                "pred_lemma": w.get("pred_lemma", "") or w.get("derive_lemma", ""),
+            }
+        )
+    out["words"] = stored_words
+    surf = (surface or "").strip()
+    if not surf and stored_words and lang in ("ru", "uk"):
+        try:
+            import glossary_inflection as gi
+
+            template = str(out.get("lemma") or surface or "").strip()
+            if template:
+                surf = gi.rebuild_phrase_surface(template, stored_words, lang).strip()
+        except Exception:
+            surf = ""
+    if surf:
+        out["surface"] = surf
+    return out
+
+
+class _ComboColumnDelegate(QStyledItemDelegate):
+    """表格列：单击弹出下拉框编辑。"""
+
+    def __init__(self, parent, choices: list[str]) -> None:
+        super().__init__(parent)
+        self._choices = list(choices)
+
+    def createEditor(self, parent, option, index):  # noqa: ARG002
+        editor = QComboBox(parent)
+        editor.addItems(self._choices)
+        editor.setEditable(False)
+        editor.setMinimumHeight(32)
+        editor.setStyleSheet(
+            "QComboBox { padding: 4px 28px 4px 10px; min-height: 24px; font-size: 13px; }"
+            "QComboBox::drop-down { width: 22px; }"
+        )
+        QTimer.singleShot(0, editor.showPopup)
+        return editor
+
+    def setEditorData(self, editor, index) -> None:
+        if not isinstance(editor, QComboBox):
+            return
+        text = str(index.model().data(index, Qt.DisplayRole) or "").strip()
+        pos = editor.findText(text)
+        if pos >= 0:
+            editor.setCurrentIndex(pos)
+        elif text:
+            editor.addItem(text)
+            editor.setCurrentText(text)
+
+    def setModelData(self, editor, model, index) -> None:
+        if isinstance(editor, QComboBox):
+            model.setData(index, editor.currentText(), Qt.EditRole)
+
+
+def _editable_pos_table_item(text: str, *, tooltip: str = "") -> QTableWidgetItem:
+    it = _pos_table_item(text)
+    it.setFlags(it.flags() | Qt.ItemIsEditable)
+    if tooltip:
+        it.setToolTip(tooltip)
+    return it
+
+
+def _display_case_zh(w: dict[str, Any]) -> str:
+    try:
+        import glossary_inflection as gi
+
+        w = gi._enrich_word_analysis(dict(w))
+    except Exception:
+        w = dict(w)
+    case_zh = (w.get("case_zh") or "").strip()
+    if case_zh:
+        return case_zh
+    case = (w.get("case") or "").strip()
+    if case in _OC_CASES:
+        return _OC_TO_CASE_ZH.get(case, case)
+    return "—"
+
+
+def _display_number_zh(w: dict[str, Any]) -> str:
+    try:
+        import glossary_inflection as gi
+
+        w = gi._enrich_word_analysis(dict(w))
+    except Exception:
+        w = dict(w)
+    num_zh = (w.get("number_zh") or "").strip()
+    if num_zh in ("sing", "plur"):
+        return {"sing": "单数", "plur": "复数"}.get(num_zh, num_zh)
+    if num_zh:
+        return num_zh
+    number = (w.get("number") or "").strip()
+    if number in _OC_NUMBER:
+        return _OC_TO_NUMBER_ZH.get(number, number)
+    return "—"
+
+
+def _apply_case_number_to_word(
+    merged: dict[str, Any],
+    case_label: str,
+    number_label: str,
+) -> None:
+    grams = [g for g in merged.get("grammemes") or [] if g not in _OC_CASES and g not in _OC_NUMBER]
+    case_label = (case_label or "").strip()
+    if case_label and case_label != "—":
+        case_oc = _CASE_ZH_TO_OC.get(case_label, "")
+        if case_oc:
+            merged["case"] = case_oc
+            merged["case_zh"] = case_label
+            grams.append(case_oc)
+        else:
+            merged["case"] = case_label
+            merged["case_zh"] = case_label
+    else:
+        merged["case"] = ""
+        merged["case_zh"] = ""
+    number_label = (number_label or "").strip()
+    if number_label and number_label != "—":
+        number_oc = _NUMBER_ZH_TO_OC.get(number_label, "")
+        if number_oc:
+            merged["number"] = number_oc
+            merged["number_zh"] = number_label
+            grams.append(number_oc)
+        else:
+            merged["number"] = number_label
+            merged["number_zh"] = number_label
+    else:
+        merged["number"] = ""
+        merged["number_zh"] = ""
+    merged["grammemes"] = sorted(set(grams))
+
+
+def _pos_table_item(text: str) -> QTableWidgetItem:
+    it = QTableWidgetItem(text or "")
+    it.setToolTip(text or "")
+    it.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+    return it
+
+
+class GlossaryWordPosDialog(QDialog):
+    """编辑一条译文内各单词的词性。"""
+
+    _POS_COL_WIDTH = 96
+    _CASE_COL_WIDTH = 80
+    _NUMBER_COL_WIDTH = 64
+    _ROW_HEIGHT = 40
+
+    def __init__(
+        self,
+        target_text: str,
+        lang: str,
+        words: list[dict[str, Any]],
+        *,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("逐词词性校对")
+        self.setMinimumSize(600, 320)
+        self.resize(700, 400)
+        self._lang = (lang or "").strip().lower()
+        self._words: list[dict[str, Any]] = [dict(w) for w in words if isinstance(w, dict)]
+
+        hint = QLabel(
+            f"译文：{target_text}\n"
+            "程序已自动识别各词词性、格与单复数；如有误请单击「词性」「格」「数」列，"
+            "在下拉框中选择正确项，确定后写回表格。"
+        )
+        hint.setWordWrap(True)
+
+        self.table = QTableWidget(len(self._words), 5, self)
+        self.table.setHorizontalHeaderLabels(["单词", "原形", "词性", "格", "数"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self.table.setEditTriggers(QAbstractItemView.CurrentChanged)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(True)
+        self.table.setItemDelegateForColumn(2, _ComboColumnDelegate(self.table, _POS_EDIT_CHOICES))
+        self.table.setItemDelegateForColumn(3, _ComboColumnDelegate(self.table, _CASE_EDIT_CHOICES))
+        self.table.setItemDelegateForColumn(4, _ComboColumnDelegate(self.table, _NUMBER_EDIT_CHOICES))
+        self.table.cellClicked.connect(self._on_edit_cell_clicked)
+        hdr = self.table.horizontalHeader()
+        hdr.setStretchLastSection(False)
+        hdr.setSectionResizeMode(0, QHeaderView.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.Fixed)
+        hdr.setSectionResizeMode(3, QHeaderView.Fixed)
+        hdr.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.table.setColumnWidth(2, self._POS_COL_WIDTH)
+        self.table.setColumnWidth(3, self._CASE_COL_WIDTH)
+        self.table.setColumnWidth(4, self._NUMBER_COL_WIDTH)
+        vhdr = self.table.verticalHeader()
+        vhdr.setVisible(False)
+        vhdr.setSectionResizeMode(QHeaderView.Fixed)
+        vhdr.setDefaultSectionSize(self._ROW_HEIGHT)
+
+        for row, w in enumerate(self._words):
+            surf = (w.get("surface") or "").strip()
+            lemma = (w.get("lemma") or surf).strip()
+            case_zh = _display_case_zh(w)
+            num_zh = _display_number_zh(w)
+            pos_label = _pos_oc_to_zh(str(w.get("pos") or ""))
+            if not pos_label or pos_label == "—":
+                pos_label = "名词"
+            self.table.setItem(row, 0, _pos_table_item(surf))
+            self.table.setItem(row, 1, _pos_table_item(lemma))
+            self.table.setItem(
+                row,
+                2,
+                _editable_pos_table_item(pos_label, tooltip="单击可修改词性"),
+            )
+            self.table.setItem(
+                row,
+                3,
+                _editable_pos_table_item(case_zh, tooltip="单击可修改格"),
+            )
+            self.table.setItem(
+                row,
+                4,
+                _editable_pos_table_item(num_zh, tooltip="单击可修改单复数"),
+            )
+            self.table.setRowHeight(row, self._ROW_HEIGHT)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addWidget(hint)
+        lay.addWidget(self.table, 1)
+        lay.addWidget(buttons)
+
+    def _on_edit_cell_clicked(self, row: int, col: int) -> None:
+        if col not in (2, 3, 4):
+            return
+        item = self.table.item(row, col)
+        if item is not None:
+            self.table.editItem(item)
+
+    def words(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for row, w in enumerate(self._words):
+            merged = dict(w)
+            it2 = self.table.item(row, 2)
+            label = it2.text().strip() if it2 else ""
+            oc = _pos_zh_to_oc(label)
+            if oc and oc != "OTHER":
+                merged["pos"] = oc
+            elif label:
+                merged["pos"] = label
+            it3 = self.table.item(row, 3)
+            it4 = self.table.item(row, 4)
+            case_label = it3.text().strip() if it3 else "—"
+            number_label = it4.text().strip() if it4 else "—"
+            _apply_case_number_to_word(merged, case_label, number_label)
+            out.append(merged)
+        return out
 
 
 class GlossaryPasteTableWidget(QTableWidget):
@@ -362,6 +845,10 @@ class GlossaryEditorDialog(QDialog):
         btn_import.clicked.connect(self.import_table_file)
         btn_export = QPushButton("导出…")
         btn_export.clicked.connect(self.export_csv_file)
+        self.btn_copy = QPushButton("复制到剪贴板")
+        self.btn_copy.clicked.connect(self.copy_table_to_clipboard)
+        self.btn_word_pos = QPushButton("逐词词性…")
+        self.btn_word_pos.clicked.connect(self._edit_selected_word_pos)
 
         row_tools = QHBoxLayout()
         row_tools.setSpacing(8)
@@ -370,6 +857,8 @@ class GlossaryEditorDialog(QDialog):
         row_tools.addWidget(btn_clear_all)
         row_tools.addWidget(btn_import)
         row_tools.addWidget(btn_export)
+        row_tools.addWidget(self.btn_copy)
+        row_tools.addWidget(self.btn_word_pos)
         row_tools.addStretch()
 
         btn_save = QPushButton("保存")
@@ -410,6 +899,8 @@ class GlossaryEditorDialog(QDialog):
                 btn_del,
                 btn_clear_all,
                 btn_close,
+                self.btn_copy,
+                self.btn_word_pos,
             ):
                 put.polish_widget(b)
             put.polish_widget(self.hint)
@@ -419,8 +910,13 @@ class GlossaryEditorDialog(QDialog):
         sc_save = QShortcut(QKeySequence.Save, self)
         sc_save.activated.connect(self.save_to_file)
 
+        self._updating_pos = False
+        self.table.itemChanged.connect(self._on_table_item_changed)
+        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+
         self._update_window_title()
         self.reload_from_file()
+        self._update_pos_tool_visibility()
 
     @staticmethod
     def _set_combo_code(combo: QComboBox, code: str) -> None:
@@ -449,10 +945,29 @@ class GlossaryEditorDialog(QDialog):
             f"术语库（{self._src_label()} → {self._tgt_label()}）"
         )
 
+    def _pos_column_count(self) -> int:
+        return 4 if _pos_supports_word_columns(self._tgt_code()) else 2
+
     def _update_table_headers(self) -> None:
-        self.table.setHorizontalHeaderLabels(
-            [f"源语（{self._src_label()}）", f"译文（{self._tgt_label()}）"]
-        )
+        cols = self._pos_column_count()
+        if self.table.columnCount() != cols:
+            self.table.setColumnCount(cols)
+        headers = [f"源语（{self._src_label()}）", f"译文（{self._tgt_label()}）"]
+        if cols >= 4:
+            headers.extend(["整体词性", "逐词词性"])
+        self.table.setHorizontalHeaderLabels(headers)
+        hdr = self.table.horizontalHeader()
+        hdr.setStretchLastSection(True)
+        hdr.setSectionResizeMode(0, QHeaderView.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.Stretch)
+        if cols >= 4:
+            hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            hdr.setSectionResizeMode(3, QHeaderView.Stretch)
+
+    def _update_pos_tool_visibility(self) -> None:
+        show = _pos_supports_word_columns(self._tgt_code())
+        self.btn_copy.setVisible(True)
+        self.btn_word_pos.setVisible(show)
 
     def _refresh_hint(self) -> None:
         text = (
@@ -468,11 +983,18 @@ class GlossaryEditorDialog(QDialog):
             )
         if self._tgt_code() in ("ru", "uk"):
             text += (
-                "\n俄/乌语译文可填任意词形（不必原形）；保存时将自动识别各词格并规范为词典原形。"
+                "\n俄/乌语译文可填任意词形（不必原形）；保存时将自动识别词性并规范为词典原形。"
+                "\n程序会按上下文变格；若单纯变格不合适，先在本地判断语法角色，"
+                "再仅对单个词联网查 bkrs 派生词与维基变格（整句不上传）。"
+                "可设环境变量 ARGOS_GLOSSARY_DERIVE_ONLINE=0 关闭联网派生。"
+                "\n也可在 JSON 写 ru_pred（整词）或 words[].pred_lemma（单词）。"
                 "\n同一中文多种外语译法：可写多行（同一中文重复多行，每行一种外语），"
                 "或在译文格用 / 、; 或换行分隔；"
                 "某译法下还有用词变体时用括号（如 священник (батько/батьки)）。"
                 "翻译时在全部译法中随机取一种；译文中相关词会高亮，鼠标悬停可改选。"
+                "\n填写俄/乌语时，「整体词性」「逐词词性」列会自动识别词性、格与单复数；"
+                "双击「逐词词性」或点「逐词词性…」可校对单个单词词性。"
+                "可用「复制到剪贴板」或「导出」粘贴到 Google 表格。"
             )
         if self._tgt_code() == "uk":
             try:
@@ -494,6 +1016,7 @@ class GlossaryEditorDialog(QDialog):
         self._update_window_title()
         self._update_table_headers()
         self._refresh_hint()
+        self._update_pos_tool_visibility()
         self.reload_from_file()
 
     def closeEvent(self, event):
@@ -513,11 +1036,10 @@ class GlossaryEditorDialog(QDialog):
             if not src or not tgt:
                 bad.append(line_number)
                 continue
-            pos = (
-                _normalize_pos(pos_raw)
-                if pos_raw
-                else infer_pos_for_target(tgt, tgt_lang)
-            )
+            if pos_raw:
+                pos = _normalize_pos(pos_raw)
+            else:
+                pos = "noun"
             entries.append((src, tgt, pos))
         return entries, bad
 
@@ -543,15 +1065,25 @@ class GlossaryEditorDialog(QDialog):
         QApplication.processEvents()
         try:
             gs = GlossaryStore().load()
-            for src, tgt, pos in entries:
-                gs.upsert_term(src, tgt_lang, tgt, pos=pos)
+            gs.upsert_terms_bulk(entries, tgt_lang, light=True)
             gs.save()
         except OSError as e:
-            QMessageBox.warning(self, "保存失败", str(e))
+            QMessageBox.warning(
+                self,
+                "保存失败",
+                f"无法写入术语库文件（请检查安装目录是否可写）：\n{e}",
+            )
+            return
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "批量添加失败",
+                f"保存术语时出错，请减少单次条数或检查俄/乌语拼写：\n{e}",
+            )
             return
         finally:
             QApplication.restoreOverrideCursor()
-        self.reload_from_file()
+        self.reload_from_file(defer_morph=True)
         msg = f"已添加 {len(entries)} 条（{self._src_label()} → {self._tgt_label()}）。"
         if bad_lines:
             preview = ", ".join(str(i) for i in bad_lines[:12])
@@ -586,35 +1118,343 @@ class GlossaryEditorDialog(QDialog):
                 return opts
         return [text]
 
-    def reload_from_file(self) -> None:
+    def _match_target_variant(self, val: Any, tgt_show: str, lang: str) -> Any:
+        show = sanitize_glossary_cell(tgt_show)
+        if not show:
+            return None
+        if isinstance(val, str):
+            cell = tb.target_cell_text({lang: val}, lang)
+            if cell == show or val.strip() == show:
+                return val
+            return None
+        if isinstance(val, dict):
+            cell = tb.target_cell_text({lang: val}, lang)
+            if cell == show:
+                return val
+            lemma = str(val.get("lemma") or "").strip()
+            if lemma == show:
+                return val
+            return None
+        if isinstance(val, list):
+            for item in val:
+                matched = self._match_target_variant(item, show, lang)
+                if matched is not None:
+                    return matched
+            try:
+                import glossary_alternatives as ga
+
+                for item in val:
+                    cell = tb.target_cell_text({lang: item}, lang)
+                    if not cell:
+                        continue
+                    if cell == show:
+                        return item
+                    opts = ga.list_all_options(cell)
+                    if show in opts:
+                        return item
+            except ImportError:
+                pass
+        return None
+
+    def _words_and_pos_for_row(
+        self, entry: Any, tgt_lang: str, tgt_show: str
+    ) -> tuple[str, list[dict[str, Any]]]:
+        lang = tgt_lang
+        entry_pos_zh = "名词"
+        words: list[dict[str, Any]] = []
+        if isinstance(entry, dict):
+            pos_raw = entry.get("pos")
+            if isinstance(pos_raw, str) and pos_raw.strip():
+                entry_pos_zh = _bucket_to_zh(_normalize_pos(pos_raw))
+            val = entry.get(tgt_lang)
+            matched = self._match_target_variant(val, tgt_show, lang)
+            if matched is not None:
+                try:
+                    import glossary_inflection as gi
+
+                    words = gi.phrase_words_from_value(matched, lang)
+                except Exception:
+                    words = []
+        if not words and tgt_show.strip():
+            words = _analyze_row_words(tgt_show, lang)
+        if entry_pos_zh == "名词" and tgt_show.strip():
+            entry_pos_zh = _bucket_to_zh(infer_pos_for_target(tgt_show, lang))
+        return entry_pos_zh, words
+
+    def _set_row_word_meta(self, row: int, words: list[dict[str, Any]]) -> None:
+        it1 = self.table.item(row, 1)
+        if it1 is None:
+            return
+        it1.setData(ROLE_WORD_META, {"words": [dict(w) for w in words]})
+
+    def _row_word_meta(self, row: int) -> list[dict[str, Any]]:
+        it1 = self.table.item(row, 1)
+        if it1 is None:
+            return []
+        meta = it1.data(ROLE_WORD_META)
+        if isinstance(meta, dict):
+            words = meta.get("words")
+            if isinstance(words, list):
+                return [w for w in words if isinstance(w, dict)]
+        return []
+
+    def _refresh_row_pos_columns(self, row: int) -> None:
+        if self._pos_column_count() < 4:
+            return
+        tgt = self.table._cell_text(row, 1)
+        lang = self._tgt_code()
+        if not tgt.strip():
+            self._updating_pos = True
+            try:
+                self.table.setItem(row, 2, GlossaryPasteTableWidget._make_item(""))
+                self.table.setItem(row, 3, GlossaryPasteTableWidget._make_item(""))
+                self._set_row_word_meta(row, [])
+            finally:
+                self._updating_pos = False
+            return
+        overrides = self._row_word_meta(row)
+        auto_words = _analyze_row_words(tgt, lang)
+        words = _merge_words_with_overrides(auto_words, overrides)
+        try:
+            import glossary_inflection as gi
+
+            corrected = gi.rebuild_phrase_surface(tgt, words, lang).strip()
+            if corrected and corrected != tgt.strip():
+                tgt = corrected
+                auto_words = _analyze_row_words(tgt, lang)
+                words = _merge_words_with_overrides(auto_words, overrides)
+        except Exception:
+            pass
+        entry_pos = self.table._cell_text(row, 2)
+        if not entry_pos.strip():
+            entry_pos = _bucket_to_zh(infer_pos_for_target(tgt, lang))
+        summary = _words_pos_summary(words)
+        self._updating_pos = True
+        try:
+            self.table.setItem(row, 1, GlossaryPasteTableWidget._make_item(tgt))
+            self.table.setItem(row, 2, GlossaryPasteTableWidget._make_item(entry_pos))
+            it3 = GlossaryPasteTableWidget._make_item(summary)
+            it3.setToolTip(
+                summary + "\n\n双击此行可编辑各单词词性。"
+            )
+            self.table.setItem(row, 3, it3)
+            self._set_row_word_meta(row, words)
+        finally:
+            self._updating_pos = False
+
+    def _fill_row_pos_columns(
+        self,
+        row: int,
+        entry_pos_zh: str,
+        words: list[dict[str, Any]],
+    ) -> None:
+        if self._pos_column_count() < 4:
+            return
+        summary = _words_pos_summary(words)
+        self.table.setItem(row, 2, GlossaryPasteTableWidget._make_item(entry_pos_zh))
+        it3 = GlossaryPasteTableWidget._make_item(summary)
+        it3.setToolTip(summary + "\n\n双击此行可编辑各单词词性。")
+        self.table.setItem(row, 3, it3)
+        self._set_row_word_meta(row, words)
+
+    def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._updating_pos:
+            return
+        if self._pos_column_count() < 4:
+            return
+        col = item.column()
+        if col in (1, 2):
+            self._refresh_row_pos_columns(item.row())
+
+    def _on_cell_double_clicked(self, row: int, col: int) -> None:
+        if col == 3 and self._pos_column_count() >= 4:
+            self._edit_row_word_pos(row)
+
+    def _edit_row_word_pos(self, row: int) -> None:
+        tgt = self.table._cell_text(row, 1)
+        if not tgt.strip():
+            QMessageBox.information(self, "逐词词性", "请先在「译文」列填写内容。")
+            return
+        lang = self._tgt_code()
+        words = self._row_word_meta(row)
+        if not words:
+            words = _analyze_row_words(tgt, lang)
+        dlg = GlossaryWordPosDialog(tgt, lang, words, parent=self)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        updated = dlg.words()
+        lang = self._tgt_code()
+        try:
+            import glossary_inflection as gi
+
+            corrected = gi.rebuild_phrase_surface(tgt, updated, lang).strip()
+            if corrected:
+                tgt = corrected
+                updated = _merge_words_with_overrides(
+                    _analyze_row_words(tgt, lang), updated
+                )
+        except Exception:
+            pass
+        self._updating_pos = True
+        try:
+            self.table.setItem(row, 1, GlossaryPasteTableWidget._make_item(tgt))
+            self._set_row_word_meta(row, updated)
+            summary = _words_pos_summary(updated)
+            it3 = GlossaryPasteTableWidget._make_item(summary)
+            it3.setToolTip(summary + "\n\n双击此行可编辑各单词词性。")
+            self.table.setItem(row, 3, it3)
+        finally:
+            self._updating_pos = False
+
+    def _edit_selected_word_pos(self) -> None:
+        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        if not rows:
+            QMessageBox.information(self, "逐词词性", "请先选中一行。")
+            return
+        self._edit_row_word_pos(rows[0])
+
+    def _parse_target_with_row_meta(
+        self, tgt_raw: str, tgt_lang: str, row: int
+    ) -> tuple[Any, str]:
+        val = tb.parse_target_cell(tgt_raw, tgt_lang)
+        entry_pos = _normalize_pos(self.table._cell_text(row, 2))
+        if tgt_lang not in ("ru", "uk"):
+            return val, entry_pos
+        words = self._row_word_meta(row)
+        if not words:
+            words = _analyze_row_words(tgt_raw, tgt_lang)
+        display = tgt_raw.strip()
+        try:
+            import glossary_inflection as gi
+
+            rebuilt = gi.rebuild_phrase_surface(tgt_raw, words, tgt_lang).strip()
+            if rebuilt:
+                display = rebuilt
+                words = _merge_words_with_overrides(
+                    _analyze_row_words(display, tgt_lang), words
+                )
+        except Exception:
+            pass
+        if isinstance(val, dict):
+            val = _apply_words_to_target_val(
+                val, words, surface=display, lang=tgt_lang
+            )
+        elif words:
+            try:
+                import glossary_inflection as gi
+
+                val2 = gi.normalize_for_glossary_storage(display or tgt_raw, tgt_lang)
+                if isinstance(val2, dict):
+                    val = _apply_words_to_target_val(
+                        val2, words, surface=display, lang=tgt_lang
+                    )
+            except Exception:
+                pass
+        pos_raw = self.table._cell_text(row, 2)
+        if pos_raw.strip():
+            entry_pos = _normalize_pos(pos_raw)
+        elif tgt_raw.strip():
+            entry_pos = infer_pos_for_target(tgt_raw, tgt_lang)
+        return val, entry_pos
+
+    def _table_export_rows(self) -> list[list[str]]:
+        cols = self._pos_column_count()
+        out: list[list[str]] = []
+        for r in range(self.table.rowCount()):
+            src = self.table._cell_text(r, 0)
+            tgt = self.table._cell_text(r, 1)
+            if not src and not tgt:
+                continue
+            row_cells = [src, tgt]
+            if cols >= 4:
+                entry_pos = self.table._cell_text(r, 2)
+                words = self._row_word_meta(r)
+                if not words and tgt.strip():
+                    words = _analyze_row_words(tgt, self._tgt_code())
+                row_cells.extend(
+                    [
+                        entry_pos,
+                        _words_pos_summary(words),
+                        _words_pos_export_detail(words),
+                    ]
+                )
+            out.append(row_cells)
+        return out
+
+    def copy_table_to_clipboard(self) -> None:
+        cols = self._pos_column_count()
+        headers = [
+            f"源语({self._src_label()})",
+            f"译文({self._tgt_label()})",
+        ]
+        if cols >= 4:
+            headers.extend(["整体词性", "逐词词性", "逐词详情"])
+        lines = ["\t".join(headers)]
+        for row_cells in self._table_export_rows():
+            lines.append("\t".join(row_cells))
+        QApplication.clipboard().setText("\n".join(lines))
+        n = max(0, len(lines) - 1)
+        QMessageBox.information(
+            self,
+            "已复制",
+            f"已复制 {n} 行到剪贴板（Tab 分隔）。\n"
+            "在 Google 表格中选中 A1 后 Ctrl+V 即可粘贴。",
+        )
+
+    def reload_from_file(self, *, defer_morph: bool = False) -> None:
         data = tb.load_glossary()
         tgt_lang = self._tgt_code()
+        cols = self._pos_column_count()
         keys = [
             k
             for k in sorted(data.keys(), key=lambda s: (len(s), s), reverse=True)
             if isinstance(k, str) and k.strip()
         ]
-        display_rows: list[tuple[str, str]] = []
+        display_rows: list[tuple[str, str, str, list[dict[str, Any]]]] = []
         for src in keys:
             entry = data[src]
             for tgt_show in self._target_rows_for_entry(entry, tgt_lang):
-                display_rows.append((src, tgt_show))
+                if defer_morph:
+                    pos_raw = entry.get("pos") if isinstance(entry, dict) else None
+                    entry_pos = _bucket_to_zh(
+                        _normalize_pos(str(pos_raw or "noun"))
+                    )
+                    words: list[dict[str, Any]] = []
+                else:
+                    try:
+                        entry_pos, words = self._words_and_pos_for_row(
+                            entry, tgt_lang, tgt_show
+                        )
+                    except Exception:
+                        entry_pos = "名词"
+                        words = []
+                display_rows.append((src, tgt_show, entry_pos, words))
         n = len(display_rows) + 1
+        self._updating_pos = True
         self.table.blockSignals(True)
         self.table.setUpdatesEnabled(False)
         try:
+            if self.table.columnCount() != cols:
+                self.table.setColumnCount(cols)
+            self._update_table_headers()
             self.table.setRowCount(n)
-            for row, (src, tgt_show) in enumerate(display_rows):
+            for row, (src, tgt_show, entry_pos, words) in enumerate(display_rows):
                 self.table.setItem(row, 0, GlossaryPasteTableWidget._make_item(src))
                 self.table.setItem(
                     row, 1, GlossaryPasteTableWidget._make_item(tgt_show)
                 )
+                if cols >= 4:
+                    self._fill_row_pos_columns(row, entry_pos, words)
             last = n - 1
             self.table.setItem(last, 0, GlossaryPasteTableWidget._make_item(""))
             self.table.setItem(last, 1, GlossaryPasteTableWidget._make_item(""))
+            if cols >= 4:
+                self.table.setItem(last, 2, GlossaryPasteTableWidget._make_item(""))
+                self.table.setItem(last, 3, GlossaryPasteTableWidget._make_item(""))
         finally:
             self.table.setUpdatesEnabled(True)
             self.table.blockSignals(False)
+            self._updating_pos = False
         self.table._resize_rows_for_contents()
 
     def delete_selected_rows(self) -> None:
@@ -718,22 +1558,18 @@ class GlossaryEditorDialog(QDialog):
         try:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.writer(f)
-                w.writerow(
-                    [
-                        f"源语({self._src_label()})",
-                        f"译文({self._tgt_label()})",
-                        f"src_lang={src_code}",
-                        f"tgt_lang={tgt_code}",
-                    ]
-                )
-                for r in range(self.table.rowCount()):
-                    it0 = self.table.item(r, 0)
-                    it1 = self.table.item(r, 1)
-                    src = sanitize_glossary_cell(it0.text() if it0 else "")
-                    tgt = sanitize_glossary_cell(it1.text() if it1 else "")
-                    if not src and not tgt:
-                        continue
-                    w.writerow([src, tgt])
+                cols = self._pos_column_count()
+                header = [
+                    f"源语({self._src_label()})",
+                    f"译文({self._tgt_label()})",
+                    f"src_lang={src_code}",
+                    f"tgt_lang={tgt_code}",
+                ]
+                if cols >= 4:
+                    header.extend(["整体词性", "逐词词性", "逐词详情"])
+                w.writerow(header)
+                for row_cells in self._table_export_rows():
+                    w.writerow(row_cells)
         except OSError as e:
             QMessageBox.warning(self, "导出失败", str(e))
             return
@@ -776,7 +1612,7 @@ class GlossaryEditorDialog(QDialog):
         tgt_lang = self._tgt_code()
         new_data: dict = {k: v for k, v in old_all.items() if isinstance(k, str)}
 
-        src_tgts: OrderedDict[str, list[str]] = OrderedDict()
+        src_tgts: OrderedDict[str, list[tuple[str, int]]] = OrderedDict()
 
         for r in range(self.table.rowCount()):
             it0 = self.table.item(r, 0)
@@ -804,11 +1640,18 @@ class GlossaryEditorDialog(QDialog):
             ]
             if not parts:
                 continue
-            src_tgts[src].extend(parts)
+            for part in parts:
+                src_tgts[src].append((part, r))
 
         multi_row = 0
-        for src, tgts in src_tgts.items():
-            tgt_vals = [tb.parse_target_cell(t, tgt_lang) for t in tgts if t.strip()]
+        for src, tgt_rows in src_tgts.items():
+            tgt_vals: list[Any] = []
+            entry_pos = "noun"
+            for t, row_idx in tgt_rows:
+                val, ep = self._parse_target_with_row_meta(t, tgt_lang, row_idx)
+                if t.strip():
+                    tgt_vals.append(val)
+                    entry_pos = ep
             if not tgt_vals:
                 continue
             old = old_all.get(src)
@@ -824,7 +1667,7 @@ class GlossaryEditorDialog(QDialog):
                 merged[tgt_lang] = tgt_vals
                 multi_row += 1
             if tgt_lang in ("ru", "uk"):
-                merged["pos"] = infer_pos_for_target(tgts[0], tgt_lang)
+                merged["pos"] = entry_pos
             new_data[src] = merged
 
         try:

@@ -92,7 +92,7 @@ def ru_cell_text(entry: Any) -> str:
 
 
 def target_cell_text(entry: Any, lang_code: str) -> str:
-    """表格目标语列：字符串或结构化俄/乌术语的 lemma 显示。"""
+    """表格目标语列：优先显示用户变格短语 surface，其次 lemma。"""
     code = (lang_code or "").strip().lower()
     if isinstance(entry, str):
         return entry
@@ -109,6 +109,10 @@ def target_cell_text(entry: Any, lang_code: str) -> str:
     if isinstance(val, str):
         return val
     if isinstance(val, dict):
+        if code in ("ru", "uk"):
+            shown = gi.phrase_display_from_value(val, code)
+            if shown:
+                return shown
         lem = str(val.get("lemma") or "").strip()
         if lem:
             return lem
@@ -407,18 +411,27 @@ def mask_source_terms(
             continue
         if not repl:
             continue
-        meta = gi.extract_term_meta(
-            {to_code: chosen_surface} if chosen_surface else entry, to_code
-        )
+        meta = gi.extract_term_meta(entry, to_code)
+        if chosen_surface:
+            meta["lemma"] = _lemma_for_chosen(chosen_surface, to_code)
+            analysis = gi.analyze_slavic_phrase(chosen_surface, to_code)
+            meta["words"] = analysis.get("words") or meta.get("words") or []
         if not meta.get("lemma"):
             meta["lemma"] = repl
         raw_cell = _raw_target_string(entry, to_code) or repl
         if ga is not None and not alternatives:
             alternatives = ga.list_options_from_entry(entry, to_code) or [repl]
-        while alias in out:
+        search_from = 0
+        while True:
+            idx = out.find(alias, search_from)
+            if idx < 0:
+                break
+            zh_before = out[:idx]
+            zh_after = out[idx + len(alias) :]
             surface, ascii_m = _glossary_surface_marker(used)
             used += 1
-            out = out.replace(alias, surface, 1)
+            out = out[:idx] + surface + out[idx + len(alias) :]
+            search_from = idx + len(surface)
             slots.append(
                 {
                     "marker": surface,
@@ -427,9 +440,12 @@ def mask_source_terms(
                     "fixed_grammemes": meta.get("fixed_grammemes"),
                     "pos": meta.get("pos"),
                     "words": meta.get("words") or [],
+                    "pred_lemma": meta.get("pred_lemma") or "",
                     "replacement": repl,
                     "zh_source": key,
                     "zh_matched": alias,
+                    "zh_context_before": zh_before,
+                    "zh_context_after": zh_after,
                     "raw_cell": raw_cell,
                     "alternatives": alternatives,
                     "chosen_index": chosen_index,
@@ -473,7 +489,12 @@ def _slot_replacement(
 ) -> str:
     """按语言与上下文生成占位符还原文本。"""
     code = (to_code or "").strip().lower()
-    lemma = str(slot.get("lemma") or slot.get("replacement") or "").strip()
+    lemma, pos_hint, words, role = gi.resolve_term_lemma_for_context(
+        slot,
+        code,
+        target_before=context_before,
+        target_after=context_after,
+    )
     if not lemma:
         return ""
     if code in ("ru", "uk"):
@@ -483,10 +504,69 @@ def _slot_replacement(
             context_before,
             context_after,
             fixed_grammemes=slot.get("fixed_grammemes"),
-            pos_hint=slot.get("pos"),
-            words=slot.get("words") if isinstance(slot.get("words"), list) else None,
+            pos_hint=pos_hint or slot.get("pos"),
+            words=words if isinstance(words, list) else None,
+            glossary_role=role,
         )
     return str(slot.get("replacement") or lemma)
+
+
+_GLOSSA_MARKER_RE = re.compile(
+    r"G[\s\u200b-\u200d\ufeff\u00a0]*L[\s\u200b-\u200d\ufeff\u00a0]*O[\s\u200b-\u200d\ufeff\u00a0]*"
+    r"S[\s\u200b-\u200d\ufeff\u00a0]*S[\s\u200b-\u200d\ufeff\u00a0]*A[\s\u200b-\u200d\ufeff\u00a0]*\d{3,4}",
+    re.IGNORECASE,
+)
+
+_MODAL_VERB_SLOT_RE = re.compile(
+    r"((?:не\s+)?(?:"
+    r"можете|можешь|может|могут|можем|можу|можно|нельзя|"
+    r"надо|нужно|следует|должен|должна|должно|должны|"
+    r"умеете|умеешь|умеет|умеют"
+    r")\s+)([А-Яа-яЁё][А-Яа-яЁё-]*(?:ть|ться|ти|чь)?)(\s+)",
+    re.IGNORECASE,
+)
+
+
+def _glossary_term_visible(out: str, slot: dict[str, Any]) -> bool:
+    norm = unicodedata.normalize("NFKC", out or "")
+    low = norm.casefold()
+    for alt in slot.get("alternatives") or []:
+        a = (alt or "").strip()
+        if a and a.casefold() in low:
+            return True
+    lem = str(slot.get("lemma") or slot.get("replacement") or "").strip()
+    if lem and lem.casefold() in low:
+        return True
+    return False
+
+
+def _glossary_marker_still_present(out: str) -> bool:
+    norm = unicodedata.normalize("NFKC", out or "")
+    if _GLOSSA_MARKER_RE.search(norm):
+        return True
+    if "ＧＬＯＳＳＡ" in norm:
+        return True
+    return False
+
+
+def _repair_lost_glossary_slot(out: str, slot: dict[str, Any], code: str) -> str:
+    """
+    机器翻译未保留 GLOSSA 占位符时，在本地根据已译上下文插入术语（仅替换动词位）。
+    不上传中文整句，仅使用已有俄/乌译文与术语 slot 元数据。
+    """
+    if code not in ("ru", "uk"):
+        return out
+    if _glossary_term_visible(out, slot):
+        return out
+    m = _MODAL_VERB_SLOT_RE.search(out or "")
+    if not m:
+        return out
+    before = out[: m.start(2)]
+    after = out[m.end(2) :]
+    repl = _slot_replacement(slot, before, after, code)
+    if not repl or repl.casefold() == m.group(2).casefold():
+        return out
+    return before + repl + after
 
 
 def restore_markers(
@@ -516,7 +596,15 @@ def restore_markers_with_spans(
         s["marker_ascii"]: s for s in slots if s.get("marker_ascii")
     }
 
-    def _record_span(start: int, end: int, slot: dict[str, Any], surface: str) -> None:
+    def _record_span(
+        start: int,
+        end: int,
+        slot: dict[str, Any],
+        surface: str,
+        *,
+        context_before: str | None = None,
+        context_after: str | None = None,
+    ) -> None:
         if end <= start or not surface:
             return
         alts = slot.get("alternatives")
@@ -535,8 +623,12 @@ def restore_markers_with_spans(
                 "fixed_grammemes": slot.get("fixed_grammemes"),
                 "pos": slot.get("pos"),
                 "words": slot.get("words") if isinstance(slot.get("words"), list) else [],
-                "context_before": out[:start],
-                "context_after": out[end:],
+                "context_before": (
+                    context_before if context_before is not None else out[:start]
+                ),
+                "context_after": (
+                    context_after if context_after is not None else out[end:]
+                ),
                 "target_lang": code,
             }
         )
@@ -544,13 +636,29 @@ def restore_markers_with_spans(
     def _repl_at(match: re.Match[str], slot: dict[str, Any]) -> str:
         before = out[: match.start()]
         after = out[match.end() :]
-        return _slot_replacement(slot, before, after, code)
+        repl = _slot_replacement(slot, before, after, code)
+        _record_span(
+            match.start(),
+            match.start() + len(repl),
+            slot,
+            repl,
+            context_before=before,
+            context_after=after,
+        )
+        return repl
 
     def _insert_repl(start: int, end: int, repl: str, slot: dict[str, Any]) -> None:
         nonlocal out
         before = out[:start]
         after = out[end:]
-        _record_span(len(before), len(before) + len(repl), slot, repl)
+        _record_span(
+            len(before),
+            len(before) + len(repl),
+            slot,
+            repl,
+            context_before=before,
+            context_after=after,
+        )
         out = before + repl + after
 
     # 精确标记（全角 / 半角）
@@ -641,7 +749,141 @@ def restore_markers_with_spans(
             return _repl_at(mm, slot)
 
         out = pat.sub(_spaced_repl, out)
+
+    if not _glossary_marker_still_present(out):
+        for s in ordered:
+            if not _glossary_term_visible(out, s):
+                prev = out
+                out = _repair_lost_glossary_slot(out, s, code)
+                if out != prev:
+                    _append_modal_verb_span(out, s, code, spans)
     return out, spans
+
+
+def _infer_chosen_index_for_surface(
+    surface: str,
+    alternatives: list[str],
+    *,
+    context_before: str = "",
+    context_after: str = "",
+    to_code: str = "",
+    pos_hint: str | None = None,
+) -> int:
+    """按译文中实际词形推断当前选中的备选下标。"""
+    surf = (surface or "").strip()
+    if not surf:
+        return 0
+    surf_cf = surf.casefold()
+    for i, alt in enumerate(alternatives):
+        if (alt or "").strip().casefold() == surf_cf:
+            return i
+    code = (to_code or "").strip().lower()
+    if code in ("ru", "uk"):
+        try:
+            import glossary_alternatives as ga
+
+            for i, alt in enumerate(alternatives):
+                inf = ga.inflect_option(
+                    alt,
+                    code,
+                    context_before,
+                    context_after,
+                    pos_hint=pos_hint,
+                )
+                if (inf or "").strip().casefold() == surf_cf:
+                    return i
+        except Exception:
+            pass
+    return 0
+
+
+def _words_for_surface(surface: str, to_code: str) -> list[dict[str, Any]]:
+    try:
+        import glossary_inflection as gi
+
+        phrase = gi.analyze_slavic_phrase((surface or "").strip(), to_code)
+        words = phrase.get("words")
+        if isinstance(words, list):
+            return [dict(w) for w in words if isinstance(w, dict)]
+    except Exception:
+        pass
+    return []
+
+
+def _append_modal_verb_span(
+    text: str,
+    slot: dict[str, Any],
+    to_code: str,
+    spans: list[dict[str, Any]],
+) -> None:
+    """术语占位符丢失、本地补动词后，记录高亮区间。"""
+    m = _MODAL_VERB_SLOT_RE.search(text or "")
+    if not m:
+        return
+    start = m.start(2)
+    end = m.end(2)
+    surface = (text or "")[start:end]
+    if not surface or not _glossary_term_visible(surface, slot):
+        return
+    alts = slot.get("alternatives")
+    if not isinstance(alts, list) or len(alts) < 2:
+        return
+    for existing in spans:
+        if int(existing.get("start") or -1) == start:
+            return
+    ctx_before = text[:start]
+    ctx_after = text[end:]
+    chosen_index = _infer_chosen_index_for_surface(
+        surface,
+        alts,
+        context_before=ctx_before,
+        context_after=ctx_after,
+        to_code=to_code,
+        pos_hint=slot.get("pos"),
+    )
+    lemma = (alts[chosen_index] or "").strip() if alts else surface
+    word_meta = _words_for_surface(surface, to_code) or _words_for_surface(
+        lemma, to_code
+    )
+    spans.append(
+        {
+            "start": start,
+            "end": end,
+            "surface": surface,
+            "zh_source": str(slot.get("zh_source") or ""),
+            "raw_cell": str(slot.get("raw_cell") or ""),
+            "alternatives": list(alts),
+            "chosen_index": chosen_index,
+            "lemma": lemma,
+            "fixed_grammemes": slot.get("fixed_grammemes"),
+            "pos": slot.get("pos"),
+            "words": word_meta,
+            "context_before": ctx_before,
+            "context_after": ctx_after,
+            "target_lang": (to_code or "").strip().lower(),
+        }
+    )
+
+
+def find_glossary_spans_in_target(
+    source_text: str,
+    target_text: str,
+    from_code: str,
+    to_code: str,
+) -> list[dict[str, Any]]:
+    """在最终译文中推断术语高亮区间（占位符丢失或后处理改形时补全）。"""
+    if not (source_text or "").strip() or not (target_text or "").strip():
+        return []
+    if not should_apply_glossary(from_code, to_code):
+        return []
+    glossary = load_glossary()
+    _, slots = mask_source_terms(source_text, glossary, to_code)
+    if not slots:
+        return []
+    spans: list[dict[str, Any]] = []
+    for slot in slots:
+        _append_modal_verb_span(target_text, slot, to_code, spans)
+    return relocate_glossary_spans(target_text, spans)
 
 
 def relocate_glossary_spans(text: str, spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -690,6 +932,339 @@ def is_chinese_source_language(code: str) -> bool:
     if c.startswith("zh-") or c.startswith("zh_"):
         return True
     return False
+
+
+_CJK_TAIL_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
+_CYR_WORD_RE = re.compile(r"[а-яёіїєґ]+", re.I)
+
+
+class _ZhFragment:
+    __slots__ = ("start", "end", "text")
+
+    def __init__(self, start: int, end: int, text: str) -> None:
+        self.start = start
+        self.end = end
+        self.text = text
+
+
+def unmasked_zh_fragments(
+    source_text: str, slots: list[dict[str, Any]]
+) -> list[_ZhFragment]:
+    """源文中未被术语替换的中文片段（保序、去重）。"""
+    src = source_text or ""
+    if not src or not _CJK_TAIL_RE.search(src):
+        return []
+    n = len(src)
+    masked = [False] * n
+    aliases: list[str] = []
+    for slot in slots:
+        alias = str(slot.get("zh_matched") or slot.get("zh_source") or "").strip()
+        if alias and alias not in aliases:
+            aliases.append(alias)
+    aliases.sort(key=len, reverse=True)
+    for alias in aliases:
+        start = 0
+        while True:
+            idx = src.find(alias, start)
+            if idx < 0:
+                break
+            for i in range(idx, min(n, idx + len(alias))):
+                masked[i] = True
+            start = idx + len(alias)
+    fragments: list[_ZhFragment] = []
+    seen: set[str] = set()
+    i = 0
+    while i < n:
+        if masked[i] or not _CJK_TAIL_RE.match(src[i]):
+            i += 1
+            continue
+        j = i
+        while j < n and not masked[j] and _CJK_TAIL_RE.match(src[j]):
+            j += 1
+        seg = src[i:j].strip()
+        if seg and seg not in seen:
+            seen.add(seg)
+            fragments.append(_ZhFragment(i, j, seg))
+        i = j
+    return fragments
+
+
+def has_untranslated_zh_beside_glossary(
+    source_text: str, from_code: str, to_code: str
+) -> bool:
+    """术语掩码旁是否仍有未替换的中文（前/中/后均算）。"""
+    if not is_chinese_source_language(from_code):
+        return False
+    if not should_apply_glossary(from_code, to_code):
+        return False
+    glossary = load_glossary()
+    _, slots = mask_source_terms(source_text, glossary, to_code)
+    return bool(unmasked_zh_fragments(source_text, slots))
+
+
+def has_untranslated_zh_after_glossary(
+    source_text: str, from_code: str, to_code: str
+) -> bool:
+    """兼容旧名。"""
+    return has_untranslated_zh_beside_glossary(source_text, from_code, to_code)
+
+
+def _zh_char_count(text: str) -> int:
+    return len(_CJK_TAIL_RE.findall(text or ""))
+
+
+def _tail_probe_words(zh_tail: str, translation) -> list[str]:
+    try:
+        raw = translation.translate(_prepare_for_argos_engine(zh_tail))
+    except Exception:
+        return []
+    return [w for w in _CYR_WORD_RE.findall((raw or "").strip()) if len(w) >= 3]
+
+
+def _fragment_missing_in_target(
+    zh_fragment: str, target: str, translation
+) -> bool:
+    frag = (zh_fragment or "").strip()
+    if not frag:
+        return False
+    tgt = (target or "").casefold()
+    words = _tail_probe_words(frag, translation)
+    if not words:
+        return _zh_char_count(frag) >= 1
+    return not any(w.casefold() in tgt for w in words)
+
+
+def _restore_glossary_target(
+    source_text: str,
+    raw_target: str,
+    to_code: str,
+    slots: list[dict[str, Any]],
+) -> str:
+    out, _ = restore_markers_with_spans(raw_target, slots, to_code=to_code)
+    ordered = sorted(slots, key=_slot_sort_key, reverse=True)
+    for slot in ordered:
+        if not _glossary_term_visible(out, slot):
+            out = _repair_lost_glossary_slot(out, slot, to_code)
+    return out
+
+
+def _full_retranslate_zh_slavic(
+    source_text: str,
+    to_code: str,
+    translation,
+    slots: list[dict[str, Any]],
+    *,
+    use_glossary: bool,
+) -> str:
+    try:
+        full_raw = translation.translate(_prepare_for_argos_engine(source_text))
+    except Exception:
+        return ""
+    full_raw = (full_raw or "").strip()
+    if use_glossary and slots:
+        return _restore_glossary_target(
+            source_text, full_raw, to_code, slots
+        ).strip()
+    return full_raw
+
+
+def _full_sentence_likely_incomplete(
+    source_text: str, target_text: str, translation
+) -> bool:
+    """无术语掩码时：整句译文明显短于独立重译结果。"""
+    src = (source_text or "").strip()
+    tgt = (target_text or "").strip()
+    if not src or not tgt:
+        return False
+    if _GLOSSA_MARKER_RE.search(tgt):
+        return True
+    zh_n = _zh_char_count(src)
+    if zh_n < 6:
+        return False
+    try:
+        probe = translation.translate(_prepare_for_argos_engine(src)).strip()
+    except Exception:
+        return False
+    if not probe or len(probe) <= len(tgt) + 6:
+        return False
+    probe_words = {
+        w.casefold() for w in _CYR_WORD_RE.findall(probe) if len(w) >= 3
+    }
+    tgt_words = {
+        w.casefold() for w in _CYR_WORD_RE.findall(tgt) if len(w) >= 3
+    }
+    return len(probe_words - tgt_words) >= 2
+
+
+def ensure_zh_to_slavic_translation_complete(
+    source_text: str,
+    target_text: str,
+    from_code: str,
+    to_code: str,
+    translation,
+    *,
+    use_glossary: bool = True,
+) -> str:
+    """
+    补全 zh→俄/乌 漏译片段：
+    - 术语掩码旁未译中文（前/中/后）；
+    - GLOSSA 占位符泄漏；
+    - 无术语时整句明显偏短。
+    """
+    if translation is None:
+        return target_text
+    src = (source_text or "").strip()
+    out = (target_text or "").strip()
+    if not src:
+        return target_text
+    if not is_chinese_source_language(from_code):
+        return target_text
+    code = (to_code or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return target_text
+
+    slots: list[dict[str, Any]] = []
+    apply_gloss = bool(
+        use_glossary and should_apply_glossary(from_code, to_code)
+    )
+    if apply_gloss:
+        glossary = load_glossary()
+        _, slots = mask_source_terms(src, glossary, code)
+
+    if _GLOSSA_MARKER_RE.search(out):
+        full_out = _full_retranslate_zh_slavic(
+            src, code, translation, slots, use_glossary=apply_gloss
+        )
+        if full_out:
+            out = full_out
+
+    fragments = unmasked_zh_fragments(src, slots) if slots else []
+    if not fragments and not slots:
+        fragments = [
+            _ZhFragment(0, len(src), src)
+        ] if _zh_char_count(src) >= 6 else []
+
+    missing = [
+        f
+        for f in fragments
+        if _fragment_missing_in_target(f.text, out, translation)
+    ]
+    if not missing and not slots:
+        if _full_sentence_likely_incomplete(src, out, translation):
+            full_out = _full_retranslate_zh_slavic(
+                src, code, translation, slots, use_glossary=False
+            )
+            if full_out:
+                return full_out.strip()
+        return out
+
+    if not missing:
+        return out
+
+    has_middle = any(0 < f.start and f.end < len(src.rstrip()) for f in missing)
+    if has_middle or len(missing) >= 2:
+        full_out = _full_retranslate_zh_slavic(
+            src, code, translation, slots, use_glossary=apply_gloss
+        )
+        if full_out and (
+            len(full_out) > len(out)
+            or not any(
+                _fragment_missing_in_target(f.text, full_out, translation)
+                for f in missing
+            )
+        ):
+            out = full_out
+
+    missing = [
+        f
+        for f in fragments
+        if _fragment_missing_in_target(f.text, out, translation)
+    ]
+    missing.sort(key=lambda f: f.start)
+    for frag in missing:
+        try:
+            chunk = translation.translate(
+                _prepare_for_argos_engine(frag.text)
+            )
+        except Exception:
+            continue
+        chunk = (chunk or "").strip().strip(".,;:!?")
+        if not chunk or chunk.casefold() in out.casefold():
+            continue
+        if frag.start == 0:
+            out = f"{chunk} {out.lstrip()}".strip()
+        elif frag.end >= len(src.rstrip()):
+            out = f"{out.rstrip()} {chunk}".strip()
+
+    still = [
+        f
+        for f in fragments
+        if _fragment_missing_in_target(f.text, out, translation)
+    ]
+    if still:
+        full_out = _full_retranslate_zh_slavic(
+            src, code, translation, slots, use_glossary=apply_gloss
+        )
+        if full_out:
+            return full_out.strip()
+    return out.strip()
+
+
+def prefers_full_decode_for_zh_slavic(
+    source_text: str, from_code: str, to_code: str
+) -> bool:
+    """中→俄/乌：含术语旁中文或较长短句时不宜极短句快路径（易漏词）。"""
+    if not is_chinese_source_language(from_code):
+        return False
+    code = (to_code or "").strip().lower()
+    if code not in ("ru", "uk"):
+        return False
+    if _zh_char_count(source_text) >= 6:
+        return True
+    return has_untranslated_zh_beside_glossary(source_text, from_code, to_code)
+
+
+def ensure_glossary_zh_tails_translated(
+    source_text: str,
+    target_text: str,
+    from_code: str,
+    to_code: str,
+    translation,
+) -> str:
+    """兼容旧名。"""
+    return ensure_zh_to_slavic_translation_complete(
+        source_text,
+        target_text,
+        from_code,
+        to_code,
+        translation,
+        use_glossary=True,
+    )
+
+
+def enforce_glossary_in_target(
+    source_text: str,
+    target_text: str,
+    from_code: str,
+    to_code: str,
+) -> str:
+    """
+    质量重译等步骤可能冲掉术语占位符；在最终译文上按源语术语 slot 补回（本地，不上传整句）。
+    """
+    if not (source_text or "").strip() or not (target_text or "").strip():
+        return target_text
+    if not should_apply_glossary(from_code, to_code):
+        return target_text
+    glossary = load_glossary()
+    _, slots = mask_source_terms(source_text, glossary, to_code)
+    if not slots:
+        return target_text
+    out, _ = restore_markers_with_spans(target_text, slots, to_code=to_code)
+    ordered = sorted(slots, key=_slot_sort_key, reverse=True)
+    for slot in ordered:
+        if not _glossary_term_visible(out, slot):
+            out = _repair_lost_glossary_slot(out, slot, to_code)
+    return out
 
 
 def apply_glossary(

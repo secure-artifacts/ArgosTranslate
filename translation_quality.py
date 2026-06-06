@@ -1221,4 +1221,12 @@ def postprocess_translation_target(
     t = _collapse_duplicate_spaces_lines(t)
     t = _cyrillic_space_before_comma_dot(t)
     t = _strip_trailing_spaces_lines(t)
+    if source_text and _is_zh_family_lang(source_lang_code or ""):
+        try:
+            import slavic_idioms as si
+
+            if si.slavic_idiom_fix_enabled():
+                t = si.apply_zh_greeting_fix(source_text, t, code)
+        except ImportError:
+            pass
     return t

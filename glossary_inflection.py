@@ -144,6 +144,42 @@ _CASE_ZH: dict[str, str] = {
     "voct": "呼格",
 }
 
+_NUMBER_ZH: dict[str, str] = {
+    "sing": "单数",
+    "plur": "复数",
+}
+
+
+def _number_from_grammemes(grams: list[str] | set[str] | None) -> str:
+    for g in grams or []:
+        if g in _OC_NUMBER:
+            return g
+    return ""
+
+
+def _enrich_word_analysis(w: dict[str, Any]) -> dict[str, Any]:
+    """补全逐词分析中的格、数等展示字段（兼容旧词条）。"""
+    out = dict(w)
+    if not out.get("case"):
+        case = ""
+        for g in out.get("grammemes") or []:
+            if g in _OC_CASES:
+                case = g
+                break
+        if case:
+            out["case"] = case
+    case = str(out.get("case") or "").strip()
+    if case and not out.get("case_zh"):
+        out["case_zh"] = _CASE_ZH.get(case, case)
+    number = str(out.get("number") or "").strip()
+    if not number:
+        number = _number_from_grammemes(out.get("grammemes"))
+        if number:
+            out["number"] = number
+    if number and not out.get("number_zh"):
+        out["number_zh"] = _NUMBER_ZH.get(number, number)
+    return out
+
 
 def _word_re(lang: str) -> re.Pattern[str]:
     return _UK_WORD if (lang or "").strip().lower() == "uk" else _RU_WORD
@@ -191,11 +227,16 @@ def analyze_slavic_word(
         "pos": "",
         "case": "",
         "case_zh": "",
+        "number": "",
+        "number_zh": "",
     }
     if not surf or morph is None:
         return empty
     gm = _gm()
-    parses = morph.parse(surf)
+    try:
+        parses = morph.parse(surf)
+    except Exception:
+        return empty
     if not parses:
         return empty
     p = (
@@ -207,10 +248,12 @@ def analyze_slavic_word(
     lemma = _cap_like(surf, (p.normal_form or surf).strip())
     pos = gm.safe_parse_pos(p) if hasattr(gm, "safe_parse_pos") else ""
     case = ""
+    number = ""
     for g in grams:
         if g in _OC_CASES:
             case = g
-            break
+        if g in _OC_NUMBER:
+            number = g
     return {
         "surface": surf,
         "lemma": lemma,
@@ -218,6 +261,8 @@ def analyze_slavic_word(
         "pos": pos or (pos_hint or ""),
         "case": case,
         "case_zh": _CASE_ZH.get(case, case),
+        "number": number,
+        "number_zh": _NUMBER_ZH.get(number, number) if number else "",
     }
 
 
@@ -234,50 +279,140 @@ def analyze_slavic_phrase(text: str, lang: str) -> dict[str, Any]:
     }
     if not raw:
         return out
-    morph = _morph_for_lang(code)
-    if morph is None:
+    try:
+        morph = _morph_for_lang(code)
+        if morph is None:
+            return out
+        words: list[dict[str, Any]] = []
+        lemma_parts: list[str] = []
+        for kind, chunk in _iter_phrase_tokens(raw, code):
+            if kind == "gap":
+                lemma_parts.append(chunk)
+                continue
+            w = analyze_slavic_word(chunk, morph)
+            words.append(w)
+            lemma_parts.append(w["lemma"])
+        out["words"] = words
+        out["lemma"] = "".join(lemma_parts)
+        _harmonize_phrase_word_cases(words)
+    except Exception:
         return out
-    words: list[dict[str, Any]] = []
-    lemma_parts: list[str] = []
-    for kind, chunk in _iter_phrase_tokens(raw, code):
-        if kind == "gap":
-            lemma_parts.append(chunk)
-            continue
-        w = analyze_slavic_word(chunk, morph)
-        words.append(w)
-        lemma_parts.append(w["lemma"])
-    out["words"] = words
-    out["lemma"] = "".join(lemma_parts)
-    _harmonize_phrase_word_cases(words)
     return out
 
 
+def rebuild_phrase_surface(
+    raw: str,
+    words: list[dict[str, Any]],
+    lang: str,
+) -> str:
+    """
+    按逐词分析（含格一致化）重新生成译文短语，修正用户输入中格不一致的词形。
+    """
+    text = (raw or "").strip()
+    code = (lang or "").strip().lower()
+    if not text or not words or code not in ("ru", "uk"):
+        return raw
+    morph = _morph_for_lang(code)
+    if morph is None:
+        return raw
+    _INFLECT_POS = frozenset({"NOUN", "ADJF", "ADJS", "PRTF", "PRTS", "NUMR", "NPRO"})
+    parts: list[str] = []
+    wi = iter(words)
+    for kind, chunk in _iter_phrase_tokens(text, code):
+        if kind == "gap":
+            parts.append(chunk)
+            continue
+        w = next(wi, None)
+        if not isinstance(w, dict):
+            parts.append(chunk)
+            continue
+        pos = str(w.get("pos") or "").strip().upper()
+        if pos in ("CONJ", "PREP", "PRCL", "INTJ"):
+            parts.append((w.get("surface") or chunk).strip() or chunk)
+            continue
+        grams = set(w.get("grammemes") or [])
+        lemma = (w.get("lemma") or chunk).strip() or chunk
+        if pos in _INFLECT_POS and grams:
+            inflected = _try_fix_word_form(morph, lemma, grams)
+            parts.append(inflected if inflected else (w.get("surface") or chunk))
+        else:
+            parts.append((w.get("surface") or chunk).strip() or chunk)
+    return "".join(parts)
+
+
+def phrase_display_from_value(val: Any, lang: str) -> str:
+    """术语表格/界面显示用：优先 surface，否则按 words 重建变格短语。"""
+    if not isinstance(val, dict):
+        return str(val).strip() if val is not None else ""
+    surf = str(val.get("surface") or "").strip()
+    if surf:
+        return surf
+    words = val.get("words")
+    lemma = str(val.get("lemma") or "").strip()
+    code = (lang or "").strip().lower()
+    if isinstance(words, list) and words and lemma and code in ("ru", "uk"):
+        rebuilt = rebuild_phrase_surface(lemma, words, code)
+        if rebuilt.strip():
+            return rebuilt.strip()
+    return lemma
+
+
 def _harmonize_phrase_word_cases(words: list[dict[str, Any]]) -> None:
-    """短语内形容词/名词格一致：以核心名词的格为准。"""
+    """短语内形容词/名词格、数一致：以核心名词为准。"""
     if not words:
         return
     head_case = ""
+    head_number = ""
     for w in reversed(words):
-        if w.get("pos") == "NOUN" and w.get("case"):
-            head_case = str(w["case"])
-            break
+        if w.get("pos") == "NOUN":
+            if w.get("case"):
+                head_case = str(w["case"])
+            num = str(w.get("number") or "").strip() or _number_from_grammemes(
+                w.get("grammemes")
+            )
+            if num:
+                head_number = num
+            if head_case and head_number:
+                break
     if not head_case:
         for w in reversed(words):
             if w.get("case"):
                 head_case = str(w["case"])
                 break
-    if not head_case:
+    if not head_number:
+        for w in reversed(words):
+            num = str(w.get("number") or "").strip() or _number_from_grammemes(
+                w.get("grammemes")
+            )
+            if num:
+                head_number = num
+                break
+
+    def _apply_agreement(w: dict[str, Any]) -> None:
+        grams = list(w.get("grammemes") or [])
+        if head_case and w.get("case") != head_case:
+            w["case"] = head_case
+            w["case_zh"] = _CASE_ZH.get(head_case, head_case)
+            grams = [g for g in grams if g not in _OC_CASES]
+            grams.append(head_case)
+        if head_number and w.get("number") != head_number:
+            w["number"] = head_number
+            w["number_zh"] = _NUMBER_ZH.get(head_number, head_number)
+            grams = [g for g in grams if g not in _OC_NUMBER]
+            grams.append(head_number)
+        if grams:
+            w["grammemes"] = sorted(set(grams))
+
+    if not head_case and not head_number:
         return
     for w in words:
         if w.get("pos") not in ("ADJF", "ADJS", "PRTF", "PRTS"):
             continue
-        if w.get("case") == head_case:
+        _apply_agreement(w)
+    for w in words:
+        if w.get("pos") != "NOUN":
             continue
-        w["case"] = head_case
-        w["case_zh"] = _CASE_ZH.get(head_case, head_case)
-        grams = [g for g in w.get("grammemes") or [] if g not in _OC_CASES]
-        grams.append(head_case)
-        w["grammemes"] = sorted(set(grams))
+        _apply_agreement(w)
 
 
 def normalize_for_glossary_storage(raw: str, lang: str) -> Any:
@@ -300,30 +435,38 @@ def normalize_for_glossary_storage(raw: str, lang: str) -> Any:
                 return obj
         except json.JSONDecodeError:
             pass
-    analysis = analyze_slavic_phrase(text, code)
-    words = analysis.get("words") or []
-    if not words:
+    try:
+        analysis = analyze_slavic_phrase(text, code)
+        words = analysis.get("words") or []
+        if not words:
+            return text
+        lemma = str(analysis.get("lemma") or text).strip()
+        if len(words) == 1:
+            w = words[0]
+            grams = set(w.get("grammemes") or [])
+            if (w.get("surface") or "").lower() == (w.get("lemma") or "").lower():
+                if not (grams & _OC_CASES) or "nomn" in grams:
+                    return lemma
+        return {
+            "lemma": lemma,
+            "surface": raw,
+            "words": [
+                {
+                    "surface": w.get("surface", ""),
+                    "lemma": w.get("lemma", ""),
+                    "grammemes": w.get("grammemes") or [],
+                    "case": w.get("case", ""),
+                    "case_zh": w.get("case_zh", ""),
+                    "number": w.get("number", ""),
+                    "number_zh": w.get("number_zh", ""),
+                    "pos": w.get("pos", ""),
+                    "pred_lemma": w.get("pred_lemma", "") or w.get("derive_lemma", ""),
+                }
+                for w in words
+            ],
+        }
+    except Exception:
         return text
-    lemma = str(analysis.get("lemma") or text).strip()
-    if len(words) == 1:
-        w = words[0]
-        grams = set(w.get("grammemes") or [])
-        if (w.get("surface") or "").lower() == (w.get("lemma") or "").lower():
-            if not (grams & _OC_CASES) or "nomn" in grams:
-                return lemma
-    return {
-        "lemma": lemma,
-        "words": [
-            {
-                "surface": w.get("surface", ""),
-                "lemma": w.get("lemma", ""),
-                "grammemes": w.get("grammemes") or [],
-                "case": w.get("case", ""),
-                "case_zh": w.get("case_zh", ""),
-            }
-            for w in words
-        ],
-    }
 
 
 def phrase_words_from_value(val: Any, lang: str) -> list[dict[str, Any]]:
@@ -331,7 +474,9 @@ def phrase_words_from_value(val: Any, lang: str) -> list[dict[str, Any]]:
     if isinstance(val, dict):
         words = val.get("words")
         if isinstance(words, list) and words:
-            return [w for w in words if isinstance(w, dict)]
+            return [
+                _enrich_word_analysis(w) for w in words if isinstance(w, dict)
+            ]
         lemma = str(val.get("lemma") or "").strip()
         if lemma:
             return analyze_slavic_phrase(lemma, lang).get("words") or []
@@ -424,6 +569,14 @@ def extract_term_meta(entry: Any, to_code: str) -> dict[str, Any]:
         meta["pos"] = pos.strip().lower()
     if not meta["lemma"] and meta["surface"]:
         meta["lemma"] = meta["surface"]
+    if isinstance(entry, dict) and code in ("ru", "uk"):
+        pred = _pred_lemma_from_entry(entry, code)
+        if pred:
+            meta["pred_lemma"] = pred
+        elif meta.get("lemma"):
+            suggested = suggest_predicate_adjective(str(meta["lemma"]), code)
+            if suggested:
+                meta["pred_lemma"] = suggested
     return meta
 
 
@@ -441,6 +594,402 @@ def _tag_grammemes(tag) -> set[str]:
     return out
 
 
+# 常见抽象名词 → 谓语形容词（中文「别/不要/很…」后常用形容词译法）
+_NOUN_PREDICATE_ADJ: dict[str, str] = {
+    "своеволие": "своевольный",
+    "своеволя": "своевольный",
+    "упрямство": "упрямый",
+    "упрямство": "упрямый",
+    "скромность": "скромный",
+    "гордость": "гордый",
+    "смирение": "смиренный",
+    "кротость": "кроткий",
+    "терпение": "терпеливый",
+}
+
+_ZH_PREDICATE_BEFORE = re.compile(
+    r"(不要|别|勿|不可|不能|别再|勿要|别要|不必|无需|无须|别做|别当|别那么|别这样|别这样太)$"
+)
+_ZH_DEGREE_BEFORE = re.compile(
+    r"(很|太|非常|十分|极其|相当|比较|有点|有些|过于|特别|真|太|怪|挺)$"
+)
+
+
+def _pred_lemma_from_entry(entry: dict[str, Any], lang_code: str) -> str:
+    code = (lang_code or "").strip().lower()
+    for key in (f"{code}_pred", "pred_adj", f"predicate_{code}", "ru_pred", "uk_pred"):
+        val = entry.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
+def suggest_predicate_adjective(lemma: str, lang_code: str) -> str | None:
+    """
+    从名词推测谓语形容词（-ость/-ие 等 + 常见词表）。
+    无法推测时返回 None。
+    """
+    text = (lemma or "").strip()
+    code = (lang_code or "").strip().lower()
+    if not text or code not in ("ru", "uk"):
+        return None
+    key = text.casefold()
+    if key in _NOUN_PREDICATE_ADJ:
+        return _NOUN_PREDICATE_ADJ[key]
+    morph = _morph_for_lang(code)
+    if morph is None:
+        return None
+    stems: list[str] = []
+    if text.endswith("ость"):
+        stems.append(text[:-4])
+    if text.endswith("ие"):
+        stems.extend([text[:-2], text[:-1]])
+    if text.endswith("ство"):
+        stems.append(text[:-4])
+    seen: set[str] = set()
+    for stem in stems:
+        if len(stem) < 3:
+            continue
+        for suf in ("ный", "ой", "ий", "ая", "ое", "ие"):
+            cand = stem + suf
+            ck = cand.casefold()
+            if ck in seen:
+                continue
+            seen.add(ck)
+            ps = morph.parse(cand)
+            if not ps:
+                continue
+            pos = _gm().safe_parse_pos(ps[0])
+            if pos in ("ADJF", "ADJS"):
+                return str(ps[0].normal_form or cand).strip() or cand
+    return None
+
+
+def infer_zh_glossary_role(zh_before: str, zh_after: str) -> str:
+    """
+    根据中文上下文推断术语语法角色。
+    predicate：别/不要/很… 等谓语位置；modifier：…的；object：其它。
+    """
+    before = (zh_before or "").strip()
+    after = (zh_after or "").strip()
+    if _ZH_PREDICATE_BEFORE.search(before) or _ZH_DEGREE_BEFORE.search(before):
+        return "predicate"
+    if before.endswith("地") and not before.endswith("的"):
+        return "adverb"
+    if after.startswith("地") and len(after) > 1:
+        return "adverb"
+    if after.startswith("的") or (after.startswith("地") and len(after) > 1):
+        return "modifier"
+    if before.endswith("的") or before.endswith("地"):
+        return "modifier"
+    if before.endswith("是") or before.endswith("变得") or before.endswith("显得"):
+        return "predicate"
+    return "object"
+
+
+_RU_PREDICATE_HEAD = frozenset(
+    {
+        "быть",
+        "являться",
+        "есть",
+        "стать",
+        "стал",
+        "стала",
+        "стало",
+        "стали",
+        "был",
+        "была",
+        "было",
+        "были",
+        "будет",
+        "будут",
+        "будем",
+        "будете",
+        "оказаться",
+        "оказался",
+        "оказалась",
+        "казаться",
+        "казался",
+        "казалась",
+        "оставаться",
+        "считаться",
+        "очень",
+        "слишком",
+        "весьма",
+        "довольно",
+        "чрезмерно",
+        "крайне",
+        "чрезвычайно",
+    }
+)
+_UK_PREDICATE_HEAD = frozenset(
+    {
+        "бути",
+        "є",
+        "ставати",
+        "став",
+        "стала",
+        "стало",
+        "стали",
+        "був",
+        "була",
+        "було",
+        "були",
+        "буде",
+        "будуть",
+        "здаватися",
+        "здається",
+        "залишатися",
+        "вважатися",
+        "дуже",
+        "занадто",
+        "надто",
+        "досить",
+        "надмірно",
+    }
+)
+
+_RU_MODAL_INFINITIVE = frozenset(
+    {
+        "мочь",
+        "может",
+        "можешь",
+        "можете",
+        "можем",
+        "могу",
+        "могут",
+        "мог",
+        "могла",
+        "могло",
+        "могли",
+        "можно",
+        "нельзя",
+        "надо",
+        "нужно",
+        "следует",
+        "должен",
+        "должна",
+        "должно",
+        "должны",
+        "стоит",
+        "придется",
+        "придётся",
+        "умеет",
+        "умеешь",
+        "умеете",
+        "умеют",
+    }
+)
+_UK_MODAL_INFINITIVE = frozenset(
+    {
+        "могти",
+        "може",
+        "можеш",
+        "можете",
+        "можемо",
+        "можуть",
+        "можу",
+        "можна",
+        "не можна",
+        "треба",
+        "потрібно",
+        "слід",
+        "мусиш",
+        "мусить",
+        "уміє",
+        "умієш",
+        "умієте",
+    }
+)
+
+
+def _modal_infinitive_set(lang: str) -> frozenset[str]:
+    return _UK_MODAL_INFINITIVE if (lang or "").strip().lower() == "uk" else _RU_MODAL_INFINITIVE
+
+
+def _token_is_modal_infinitive_head(tok: str, morph, lang: str) -> bool:
+    t = (tok or "").strip().lower()
+    if not t:
+        return False
+    if t in _modal_infinitive_set(lang):
+        return True
+    if morph is None:
+        return False
+    ps = morph.parse(t)
+    if not ps:
+        return False
+    gm = _gm()
+    for p in ps[:3]:
+        nf = (p.normal_form or "").strip().lower()
+        if nf in _modal_infinitive_set(lang) or nf == "мочь":
+            return True
+        if hasattr(gm, "safe_parse_pos") and gm.safe_parse_pos(p) == "VERB":
+            if nf == "мочь" or t.startswith("мож"):
+                return True
+    return False
+
+
+def _has_modal_infinitive_head(tokens_before: list[str], morph, lang: str) -> bool:
+    """占位符前为 …не? + 情态动词 → 术语应为不定式（не можете VERB …）。"""
+    if not tokens_before:
+        return False
+    i = len(tokens_before) - 1
+    if i >= 0 and tokens_before[i] in ("не", "ні"):
+        i -= 1
+    if i < 0:
+        return False
+    return _token_is_modal_infinitive_head(tokens_before[i], morph, lang)
+
+
+def _term_expects_infinitive(
+    pos_hint: str | None,
+    words: list[dict[str, Any]] | None,
+    lemma: str,
+    morph,
+) -> bool:
+    ph = (pos_hint or "").strip().lower()
+    if ph in ("verb", "infn"):
+        return True
+    if words:
+        for w in words:
+            if not isinstance(w, dict):
+                continue
+            p = str(w.get("pos") or "").strip().upper()
+            if p in ("VERB", "INFN"):
+                return True
+            if p and p not in ("VERB", "INFN"):
+                return False
+    lem = (lemma or "").strip()
+    if lem and morph is not None:
+        ps = morph.parse(lem)
+        if ps:
+            pos = _gm().safe_parse_pos(ps[0])
+            if pos in ("INFN", "VERB"):
+                tag = ps[0].tag
+                try:
+                    if tag and "INFN" in str(tag):
+                        return True
+                except (ValueError, TypeError):
+                    pass
+                if lem.endswith(("ть", "ти", "чь", "ться", "тись")):
+                    return True
+    return False
+
+
+def infer_glossary_role(
+    zh_before: str,
+    zh_after: str,
+    target_before: str,
+    target_after: str,
+    lang_code: str,
+) -> str:
+    """综合中文位置与译文上下文，判断术语应作谓语/定语/宾语。"""
+    role = infer_zh_glossary_role(zh_before, zh_after)
+    if role != "object":
+        return role
+    code = (lang_code or "").strip().lower()
+    tokens = _uk_tokens(target_before) if code == "uk" else _ru_tokens(target_before)
+    if not tokens:
+        return role
+    heads = _UK_PREDICATE_HEAD if code == "uk" else _RU_PREDICATE_HEAD
+    last = tokens[-1]
+    if last in heads:
+        return "predicate"
+    if len(tokens) >= 2 and tokens[-2] in ("не", "ні") and last in heads:
+        return "predicate"
+    if (target_after or "").lstrip().startswith((".", ",", ";", "!", "?", "…")):
+        if last in heads or (len(tokens) >= 2 and tokens[-2] in ("не", "ні")):
+            return "predicate"
+    return role
+
+
+def _pos_hint_from_oc(pos_oc: str) -> str | None:
+    p = (pos_oc or "").strip().upper()
+    return {
+        "NOUN": "noun",
+        "VERB": "verb",
+        "INFN": "verb",
+        "GRND": "verb",
+        "ADJF": "adj",
+        "ADJS": "adj",
+        "PRTF": "adj",
+        "PRTS": "adj",
+        "NUMR": "noun",
+        "NPRO": "noun",
+    }.get(p)
+
+
+def resolve_word_lemma_for_role(
+    word: dict[str, Any],
+    role: str,
+    lang_code: str,
+) -> tuple[str, str | None]:
+    """
+    单词级：必要时名词→派生词（本地规则 / bkrs 单词查询），再按 pos 变格。
+    """
+    w = _enrich_word_analysis(dict(word))
+    lemma = str(w.get("lemma") or w.get("surface") or "").strip()
+    if not lemma:
+        return "", None
+    code = (lang_code or "").strip().lower()
+    pos = str(w.get("pos") or "").strip().upper()
+    pred = str(w.get("pred_lemma") or w.get("derive_lemma") or "").strip()
+    if not pred and role in ("predicate", "modifier") and pos in ("", "NOUN"):
+        pred = suggest_predicate_adjective(lemma, code) or ""
+    if pred and role in ("predicate", "modifier"):
+        return pred, "adj"
+    if role in ("predicate", "modifier", "adverb"):
+        try:
+            import glossary_derivation as gd
+
+            picked = gd.pick_derivative_for_role(lemma, role, code)
+            if picked:
+                wl, hint = picked
+                if wl:
+                    return wl, hint or _pos_hint_from_oc(pos)
+        except Exception:
+            pass
+    return lemma, _pos_hint_from_oc(pos)
+
+
+def resolve_term_lemma_for_context(
+    slot: dict[str, Any],
+    lang_code: str,
+    *,
+    target_before: str = "",
+    target_after: str = "",
+) -> tuple[str, str | None, list[dict[str, Any]], str]:
+    """按语境选择原形与词性提示（含名词→形容词派生）；返回语法角色。"""
+    code = (lang_code or "").strip().lower()
+    lemma = str(slot.get("lemma") or slot.get("replacement") or "").strip()
+    pos_hint = str(slot.get("pos") or "").strip().lower() or None
+    words = slot.get("words") if isinstance(slot.get("words"), list) else []
+    if code not in ("ru", "uk") or not lemma:
+        return lemma, pos_hint, words, "object"
+
+    role = infer_glossary_role(
+        str(slot.get("zh_context_before") or ""),
+        str(slot.get("zh_context_after") or ""),
+        target_before,
+        target_after,
+        code,
+    )
+    if not words:
+        words = analyze_slavic_phrase(lemma, code).get("words") or []
+    cyr_in_lemma = _word_re(code).findall(lemma)
+    single_word = len(words) <= 1 and len(cyr_in_lemma) <= 1
+
+    pred = str(slot.get("pred_lemma") or "").strip()
+    if not pred and single_word:
+        pred = suggest_predicate_adjective(lemma, code) or ""
+
+    if single_word and role in ("predicate", "modifier") and pred:
+        lemma = pred
+        pos_hint = "adj"
+        words = analyze_slavic_phrase(pred, code).get("words") or []
+    return lemma, pos_hint, words, role
+
+
 def _pick_parse_for_lemma(morph, lemma: str, pos_hint: str | None = None):
     if morph is None:
         return None
@@ -456,12 +1005,18 @@ def _pick_parse_for_lemma(morph, lemma: str, pos_hint: str | None = None):
         ]
         if verbs:
             return max(verbs, key=lambda p: p.score)
-    if pos_hint == "noun":
+    if pos_hint in ("noun",):
         nouns = [
             p for p in parses if gm.safe_parse_pos(p) == "NOUN"
         ]
         if nouns:
             return max(nouns, key=lambda p: p.score)
+    if pos_hint in ("adj", "adjective"):
+        adjs = [
+            p for p in parses if gm.safe_parse_pos(p) in ("ADJF", "ADJS")
+        ]
+        if adjs:
+            return max(adjs, key=lambda p: p.score)
     return parses[0]
 
 
@@ -1124,6 +1679,8 @@ def _infer_misc_case_rules(
         if _token_in_frozenset(head, _sgr.NUMERAL_GENTIVE_HEADS):
             return "gent", set(grams)
     if _negated_verb_in_context(tokens_before, morph, lang):
+        if _has_modal_infinitive_head(tokens_before, morph, lang):
+            return chosen_case, grams
         return "gent", grams
     return chosen_case, grams
 
@@ -1459,28 +2016,29 @@ def infer_ru_grammemes(
         chosen_case, grams, tokens_before, morph, "ru"
     )
 
-    # 3) 动词后宾语/补语格（优先于误用主格的形容词）
+    # 3) 动词后宾语/补语格（情态动词 + 不定式术语时不推断宾格）
     if chosen_case is None and morph is not None:
-        for tok in reversed(tokens_before[-4:]):
-            if tok in _ru_prep_governs() or tok in _RU_GENTIVE_HEAD:
-                continue
-            if tok in _sgr.EXISTENTIAL_MARKERS:
-                continue
-            ps = morph.parse(tok)
-            if not ps:
-                continue
-            if _gm().safe_parse_pos(ps[0]) == "VERB":
-                np = (
-                    _pick_parse_for_lemma(morph, (lemma or "").strip())
-                    if (lemma or "").strip()
-                    else None
-                )
-                vc = _resolve_verb_object_case_for_noun(
-                    ps[0], np, tokens_before, morph, "ru"
-                )
-                if vc:
-                    chosen_case = vc
-                    break
+        if not _has_modal_infinitive_head(tokens_before, morph, "ru"):
+            for tok in reversed(tokens_before[-4:]):
+                if tok in _ru_prep_governs() or tok in _RU_GENTIVE_HEAD:
+                    continue
+                if tok in _sgr.EXISTENTIAL_MARKERS:
+                    continue
+                ps = morph.parse(tok)
+                if not ps:
+                    continue
+                if _gm().safe_parse_pos(ps[0]) == "VERB":
+                    np = (
+                        _pick_parse_for_lemma(morph, (lemma or "").strip())
+                        if (lemma or "").strip()
+                        else None
+                    )
+                    vc = _resolve_verb_object_case_for_noun(
+                        ps[0], np, tokens_before, morph, "ru"
+                    )
+                    if vc:
+                        chosen_case = vc
+                        break
 
     chosen_case = _apply_context_after_infer(
         chosen_case, tokens_before, tokens_after, morph, "ru", lemma=lemma
@@ -1923,6 +2481,50 @@ def _inflect_with_morph(
     return None
 
 
+def _inflect_phrase_words(
+    phrase_lemma: str,
+    words: list[dict[str, Any]],
+    morph,
+    grammemes: set[str],
+    lang: str,
+    *,
+    pos_hint: str | None = None,
+    glossary_role: str = "object",
+) -> str:
+    """多词术语：逐词派生（如需）后按同一套句法 grammemes 变格。"""
+    wi = iter(words)
+    parts: list[str] = []
+    code = (lang or "").strip().lower()
+    for kind, chunk in _iter_phrase_tokens(phrase_lemma, lang):
+        if kind == "gap":
+            parts.append(chunk)
+            continue
+        w = next(wi, None)
+        if not isinstance(w, dict):
+            w = {"lemma": chunk, "surface": chunk}
+        wl, wh = resolve_word_lemma_for_role(w, glossary_role, code)
+        if not wl:
+            wl = chunk
+        got = _inflect_with_morph(morph, wl, grammemes, pos_hint=wh or pos_hint)
+        if not got and glossary_role in ("predicate", "modifier", "adverb"):
+            try:
+                import glossary_derivation as gd
+
+                got = gd.inflect_single_word_online_safe(
+                    wl, grammemes, code, pos_hint=wh or pos_hint
+                )
+            except Exception:
+                got = None
+        if not got and glossary_role in ("predicate", "modifier"):
+            pred = suggest_predicate_adjective(wl, code)
+            if pred and pred.casefold() != wl.casefold():
+                got = _inflect_with_morph(morph, pred, grammemes, pos_hint="adj")
+                if got:
+                    wl = pred
+        parts.append(got if got else wl)
+    return "".join(parts)
+
+
 def _inflect_phrase_lemma(
     phrase_lemma: str,
     word_lemmas: list[str],
@@ -1932,17 +2534,17 @@ def _inflect_phrase_lemma(
     *,
     pos_hint: str | None = None,
 ) -> str:
-    """多词术语：各词使用同一套句法 grammemes（格/数一致）分别变格。"""
-    it = iter(word_lemmas)
-    parts: list[str] = []
-    for kind, chunk in _iter_phrase_tokens(phrase_lemma, lang):
-        if kind == "gap":
-            parts.append(chunk)
-            continue
-        wl = next(it, chunk)
-        got = _inflect_with_morph(morph, wl, grammemes, pos_hint=pos_hint)
-        parts.append(got if got else wl)
-    return "".join(parts)
+    """兼容：仅 lemma 列表时包装为逐词 dict。"""
+    words = [{"lemma": wl, "surface": wl} for wl in word_lemmas]
+    return _inflect_phrase_words(
+        phrase_lemma,
+        words,
+        morph,
+        grammemes,
+        lang,
+        pos_hint=pos_hint,
+        glossary_role="object",
+    )
 
 
 def _apply_capitalization(before: str, word: str) -> str:
@@ -1964,10 +2566,11 @@ def inflect_glossary_term(
     fixed_grammemes: list[str] | None = None,
     pos_hint: str | None = None,
     words: list[dict[str, Any]] | None = None,
+    glossary_role: str = "object",
 ) -> str:
     """
-    将术语原形按上下文变格；无形态库或无法变格时返回原形。
-    words：术语库逐词分析（各词 lemma）；多词时各词同格变位。
+    将术语原形按上下文变格；必要时先派生（名词→形容词等）再变格。
+    words：术语库逐词分析（各词 lemma）；多词时各词可单独派生后同格变位。
     """
     lem = (lemma or "").strip()
     if not lem:
@@ -1992,24 +2595,58 @@ def inflect_glossary_term(
     else:
         morph = _morph_ru()
 
-    word_lemmas: list[str] = []
-    if words:
-        word_lemmas = [
-            str(w.get("lemma") or w.get("surface") or "").strip()
-            for w in words
-            if isinstance(w, dict)
-            and str(w.get("lemma") or w.get("surface") or "").strip()
-        ]
+    tokens_before_ctx = (
+        _uk_tokens(context_before) if code == "uk" else _ru_tokens(context_before)
+    )
+    if (
+        _has_modal_infinitive_head(tokens_before_ctx, morph, code)
+        and _term_expects_infinitive(pos_hint, words, lem, morph)
+    ):
+        w0 = (words[0] if words and isinstance(words[0], dict) else None) or {
+            "lemma": lem,
+            "surface": lem,
+        }
+        target, _ = resolve_word_lemma_for_role(w0, "object", code)
+        inf = (target or lem).strip() or lem
+        return _apply_capitalization(context_before, inf)
+
     cyr_in_lemma = _word_re(code).findall(lem)
-    if len(word_lemmas) > 1 or (len(word_lemmas) == 1 and len(cyr_in_lemma) > 1):
-        if len(word_lemmas) < len(cyr_in_lemma):
-            word_lemmas = cyr_in_lemma
-        inflected = _inflect_phrase_lemma(
-            lem, word_lemmas, morph, grams, code, pos_hint=pos_hint
+    word_dicts = [dict(w) for w in words if isinstance(w, dict)] if words else []
+    if len(word_dicts) > 1 or (len(word_dicts) == 1 and len(cyr_in_lemma) > 1):
+        if len(word_dicts) < len(cyr_in_lemma):
+            word_dicts = [
+                {"lemma": wl, "surface": wl} for wl in cyr_in_lemma
+            ]
+        inflected = _inflect_phrase_words(
+            lem,
+            word_dicts,
+            morph,
+            grams,
+            code,
+            pos_hint=pos_hint,
+            glossary_role=glossary_role,
         )
     else:
-        target = word_lemmas[0] if word_lemmas else lem
-        inflected = _inflect_with_morph(morph, target, grams, pos_hint=pos_hint)
+        w0 = word_dicts[0] if word_dicts else {"lemma": lem, "surface": lem}
+        target, wh = resolve_word_lemma_for_role(w0, glossary_role, code)
+        if not target:
+            target = lem
+        inflected = _inflect_with_morph(
+            morph, target, grams, pos_hint=wh or pos_hint
+        )
+        if not inflected and glossary_role in ("predicate", "modifier", "adverb"):
+            try:
+                import glossary_derivation as gd
+
+                inflected = gd.inflect_single_word_online_safe(
+                    target, grams, code, pos_hint=wh or pos_hint
+                )
+            except Exception:
+                pass
+        if not inflected and glossary_role in ("predicate", "modifier"):
+            pred = suggest_predicate_adjective(target, code)
+            if pred:
+                inflected = _inflect_with_morph(morph, pred, grams, pos_hint="adj")
 
     result = inflected if inflected else lem
     return _apply_capitalization(context_before, result)

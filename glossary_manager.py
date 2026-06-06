@@ -86,12 +86,13 @@ def _shared_morph_analyzer() -> Any | None:
         try:
             from pymorphy2 import MorphAnalyzer
 
-            _morph_singleton = MorphAnalyzer()
+            morph = MorphAnalyzer()
             try:
-                _morph_singleton.parse("тест")
+                morph.parse("тест")
             except Exception:
                 pass
-        except ImportError:
+            _morph_singleton = morph
+        except Exception:
             _morph_singleton = None
     return _morph_singleton
 
@@ -302,7 +303,10 @@ def infer_pos_from_russian(ru: str) -> str:
     if not tokens:
         return "noun"
     for w in tokens[:8]:
-        parses = morph.parse(w)
+        try:
+            parses = morph.parse(w)
+        except Exception:
+            continue
         if not parses:
             continue
         pos = safe_parse_pos(pick_morph_parse(parses, w))
@@ -311,7 +315,10 @@ def infer_pos_from_russian(ru: str) -> str:
         if pos is None:
             continue
         return _opencorpora_pos_to_bucket(pos)
-    parses0 = morph.parse(tokens[0])
+    try:
+        parses0 = morph.parse(tokens[0])
+    except Exception:
+        return "noun"
     if not parses0:
         return "noun"
     pos0 = safe_parse_pos(pick_morph_parse(parses0, tokens[0]))
@@ -399,6 +406,8 @@ class GlossaryStore:
         target_lang: str,
         target: str,
         pos: str | None = None,
+        *,
+        light: bool = False,
     ) -> GlossaryStore:
         """合并写入一条源语→目标语（保留同键下其它语言字段）。"""
         from terminology_bridge import parse_target_cell
@@ -409,7 +418,10 @@ class GlossaryStore:
         if not source or not target_lang or not target:
             return self
         prev = self._data.get(source)
-        val = parse_target_cell(target, target_lang)
+        if light or target_lang not in ("ru", "uk"):
+            val: Any = target
+        else:
+            val = parse_target_cell(target, target_lang)
         entry = _normalize_entry(prev) if prev is not None else {}
         prev_val = entry.get(target_lang)
         if prev_val is None:
@@ -426,9 +438,28 @@ class GlossaryStore:
         entry[target_lang] = new_val
         if pos is not None and str(pos).strip() != "":
             entry["pos"] = _normalize_pos_import(str(pos))
-        elif target_lang in ("ru", "uk"):
+        elif not light and target_lang in ("ru", "uk"):
             entry["pos"] = infer_pos_for_target(target, target_lang)
         self._data[source] = entry
+        return self
+
+    def upsert_terms_bulk(
+        self,
+        rows: list[tuple[str, str, str]],
+        target_lang: str,
+        *,
+        light: bool = True,
+    ) -> GlossaryStore:
+        """批量写入（默认轻量模式，避免 pymorphy2 逐条分析导致卡顿/崩溃）。"""
+        code = (target_lang or "").strip().lower()
+        for source, target, pos in rows:
+            self.upsert_term(
+                source,
+                code,
+                target,
+                pos=pos or None,
+                light=light,
+            )
         return self
 
     def upsert_zh_ru(

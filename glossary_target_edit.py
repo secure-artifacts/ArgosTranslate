@@ -4,12 +4,11 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from PyQt5.QtCore import QPoint, Qt, QTimer
-from PyQt5.QtGui import QColor, QTextCharFormat, QTextCursor
+from PyQt5.QtGui import QColor, QTextCharFormat, QTextCursor, QTextFormat
 from PyQt5.QtWidgets import (
     QFrame,
     QLabel,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -26,8 +25,9 @@ class GlossaryChoicePopup(QFrame):
     """悬停时展示术语库一行内的各译法（每行一种）。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent, Qt.ToolTip | Qt.FramelessWindowHint)
+        super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint)
         self.setObjectName("GlossaryChoicePopup")
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setStyleSheet(
             """
             QFrame#GlossaryChoicePopup {
@@ -40,6 +40,7 @@ class GlossaryChoicePopup(QFrame):
                 padding: 6px 12px;
                 border: none;
                 border-radius: 4px;
+                background: transparent;
             }
             QPushButton#glossaryAltBtn:hover {
                 background: palette(highlight);
@@ -53,24 +54,19 @@ class GlossaryChoicePopup(QFrame):
             """
         )
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(4, 4, 4, 4)
+        outer.setContentsMargins(6, 6, 6, 6)
         outer.setSpacing(2)
         self._head = QLabel("")
         self._head.setObjectName("glossaryAltHead")
         self._head.setWordWrap(True)
         outer.addWidget(self._head)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setMaximumHeight(220)
         self._body = QWidget()
         self._body_l = QVBoxLayout(self._body)
         self._body_l.setContentsMargins(0, 0, 0, 0)
         self._body_l.setSpacing(0)
-        scroll.setWidget(self._body)
-        outer.addWidget(scroll)
+        outer.addWidget(self._body)
         self._on_pick: Callable[[int], None] | None = None
+        self._shown_key: tuple[str, tuple[str, ...], int] | None = None
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self.hide)
@@ -85,41 +81,50 @@ class GlossaryChoicePopup(QFrame):
         on_pick: Callable[[int], None],
     ) -> None:
         self._on_pick = on_pick
-        while self._body_l.count():
-            item = self._body_l.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
-        head = (zh_source or "").strip()
-        self._head.setText(f"术语：{head}" if head else "术语译法")
-        self._head.setVisible(bool(head))
-        for i, alt in enumerate(alternatives):
-            label = (alt or "").strip()
-            if not label:
-                continue
-            btn = QPushButton(label)
-            btn.setObjectName("glossaryAltBtn")
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setMinimumWidth(280)
-            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-            if i == chosen_index:
-                btn.setStyleSheet(
-                    "font-weight: 600; color: #1A73E8; background: #E8F0FE;"
-                )
-            idx = i
+        opts = tuple((alt or "").strip() for alt in alternatives if (alt or "").strip())
+        key = ((zh_source or "").strip(), opts, chosen_index)
+        if key != self._shown_key:
+            self._shown_key = key
+            while self._body_l.count():
+                item = self._body_l.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
+            head = (zh_source or "").strip()
+            self._head.setText(f"术语：{head}" if head else "术语译法")
+            self._head.setVisible(bool(head))
+            for i, label in enumerate(opts):
+                btn = QPushButton(label)
+                btn.setObjectName("glossaryAltBtn")
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setMinimumWidth(220)
+                btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+                if i == chosen_index:
+                    btn.setStyleSheet(
+                        "font-weight: 600; color: #1A73E8; background: #E8F0FE;"
+                    )
+                else:
+                    btn.setStyleSheet("")
+                idx = i
 
-            def _clicked(_checked: bool = False, pick: int = idx) -> None:
-                if self._on_pick is not None:
-                    self._on_pick(pick)
-                self.hide()
+                def _pick(pick: int = idx) -> None:
+                    cb = self._on_pick
+                    self.hide()
+                    if cb is not None:
+                        QTimer.singleShot(0, lambda p=pick: cb(p))
 
-            btn.clicked.connect(_clicked)
-            self._body_l.addWidget(btn)
-        self.adjustSize()
+                btn.clicked.connect(lambda _checked=False, pick=idx: _pick(pick))
+                self._body_l.addWidget(btn)
+            self.adjustSize()
         self.move(global_pos)
-        self.show()
+        if not self.isVisible():
+            self.show()
         self.raise_()
         self._hide_timer.stop()
+
+    def hide(self) -> None:
+        self._shown_key = None
+        super().hide()
 
     def schedule_hide(self) -> None:
         self._hide_timer.start(_POPUP_HIDE_MS)
@@ -173,32 +178,46 @@ class GlossarySpanMixin:
         if hasattr(self, "_popup"):
             self._popup.hide()
 
+    def _clear_glossary_char_formats(self) -> None:
+        doc = self.document()
+        if doc is None:
+            return
+        plain_fmt = QTextCharFormat()
+        plain_fmt.setProperty(QTextFormat.FullWidthSelection, False)
+        c = QTextCursor(doc)
+        c.select(QTextCursor.Document)
+        c.setCharFormat(plain_fmt)
+
+    def _glossary_highlight_format(self) -> QTextCharFormat:
+        fmt = QTextCharFormat()
+        fmt.setBackground(_GLOSSARY_BG)
+        fmt.setForeground(_GLOSSARY_FG)
+        fmt.setFontUnderline(True)
+        fmt.setProperty(QTextFormat.FullWidthSelection, False)
+        return fmt
+
     def _apply_glossary_highlights(self) -> None:
         doc = self.document()
         if doc is None:
             return
         plain = self.toPlainText()
-        fmt_clear = QTextCharFormat()
-        cursor = QTextCursor(doc)
-        cursor.select(QTextCursor.Document)
-        cursor.setCharFormat(fmt_clear)
-        cursor.clearSelection()
+        self._clear_glossary_char_formats()
         if not self._glossary_spans:
             return
-        fmt = QTextCharFormat()
-        fmt.setBackground(_GLOSSARY_BG)
-        fmt.setForeground(_GLOSSARY_FG)
-        fmt.setFontUnderline(True)
+        fmt = self._glossary_highlight_format()
         for sp in self._glossary_spans:
             start = int(sp.get("start") or 0)
             end = int(sp.get("end") or 0)
             if end <= start or start >= len(plain):
                 continue
             end = min(end, len(plain))
+            surface = plain[start:end]
+            if not surface.strip():
+                continue
             c = QTextCursor(doc)
             c.setPosition(start)
             c.setPosition(end, QTextCursor.KeepAnchor)
-            c.mergeCharFormat(fmt)
+            c.setCharFormat(fmt)
 
     def _span_index_at(self, pos: int) -> int | None:
         for i, sp in enumerate(getattr(self, "_glossary_spans", [])):
@@ -238,13 +257,26 @@ class GlossarySpanMixin:
         option = (alts[option_index] or "").strip()
         if not option:
             return
+        plain = self.toPlainText()
+        try:
+            import terminology_bridge as tb
+
+            relocated = tb.relocate_glossary_spans(plain, [dict(sp)])
+            if relocated:
+                sp = spans[span_index] = relocated[0]
+        except ImportError:
+            pass
+        start = int(sp.get("start") or 0)
+        end = int(sp.get("end") or 0)
+        if start < 0 or end <= start or end > len(plain):
+            return
         lang = str(sp.get("target_lang") or "ru")
+        ctx_before = plain[:start]
+        ctx_after = plain[end:]
         try:
             import glossary_alternatives as ga
         except ImportError:
             ga = None  # type: ignore
-        ctx_before = str(sp.get("context_before") or "")
-        ctx_after = str(sp.get("context_after") or "")
         if ga is not None:
             new_surface = ga.inflect_option(
                 option,
@@ -253,25 +285,41 @@ class GlossarySpanMixin:
                 ctx_after,
                 fixed_grammemes=sp.get("fixed_grammemes"),
                 pos_hint=sp.get("pos"),
-                words=sp.get("words") if isinstance(sp.get("words"), list) else None,
             )
         else:
             new_surface = option
-        start = int(sp.get("start") or 0)
-        end = int(sp.get("end") or 0)
-        plain = self.toPlainText()
-        if end > len(plain) or start < 0:
+        if not new_surface:
             return
-        delta = len(new_surface) - (end - start)
-        new_plain = plain[:start] + new_surface + plain[end:]
         self._programmatic_update = True
+        self.blockSignals(True)
         try:
-            self.setPlainText(new_plain)
+            doc = self.document()
+            if doc is None:
+                return
+            cursor = QTextCursor(doc)
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.KeepAnchor)
+            cursor.insertText(new_surface)
+            new_plain = self.toPlainText()
+            new_start = start
+            new_end = start + len(new_surface)
+            delta = len(new_surface) - (end - start)
             sp["surface"] = new_surface
             sp["chosen_index"] = option_index
-            sp["end"] = start + len(new_surface)
-            sp["context_before"] = new_plain[:start]
-            sp["context_after"] = new_plain[start + len(new_surface) :]
+            sp["lemma"] = option
+            sp["start"] = new_start
+            sp["end"] = new_end
+            sp["context_before"] = new_plain[:new_start]
+            sp["context_after"] = new_plain[new_end:]
+            try:
+                import glossary_inflection as gi
+
+                phrase = gi.analyze_slavic_phrase(new_surface, lang)
+                words = phrase.get("words")
+                if isinstance(words, list):
+                    sp["words"] = [dict(w) for w in words if isinstance(w, dict)]
+            except Exception:
+                pass
             for j, other in enumerate(spans):
                 if j == span_index:
                     continue
@@ -284,7 +332,9 @@ class GlossarySpanMixin:
                     other["context_after"] = new_plain[oend:]
             self._apply_glossary_highlights()
         finally:
+            self.blockSignals(False)
             self._programmatic_update = False
+        self._active_span_index = span_index
         self._popup.hide()
 
     def _glossary_mouse_move(self, event) -> bool:
@@ -297,9 +347,12 @@ class GlossarySpanMixin:
         if idx is not None:
             self._popup.cancel_hide()
             if idx != self._active_span_index or not self._popup.isVisible():
-                self._show_popup_for_span(
-                    idx, self.mapToGlobal(event.pos() + QPoint(12, 16))
+                cursor = self.cursorForPosition(event.pos())
+                rect = self.cursorRect(cursor)
+                global_top_left = self.mapToGlobal(
+                    QPoint(rect.left(), rect.bottom() + 4)
                 )
+                self._show_popup_for_span(idx, global_top_left)
             return True
         self._active_span_index = None
         if self._popup.isVisible():

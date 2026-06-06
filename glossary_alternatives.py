@@ -227,6 +227,18 @@ def inflect_option(
         import glossary_inflection as gi
     except ImportError:
         return opt
+    use_words: list | None = None
+    try:
+        phrase = gi.analyze_slavic_phrase(opt, code)
+        parsed = phrase.get("words") if isinstance(phrase.get("words"), list) else None
+        if parsed:
+            use_words = parsed
+    except Exception:
+        use_words = None
+    if use_words is None and isinstance(words, list) and words:
+        first = words[0] if isinstance(words[0], dict) else {}
+        if (first.get("lemma") or "").strip().casefold() == opt.casefold():
+            use_words = words
     return gi.inflect_glossary_term(
         opt,
         code,
@@ -234,5 +246,5 @@ def inflect_option(
         context_after,
         fixed_grammemes=list(fixed_grammemes) if fixed_grammemes else None,
         pos_hint=pos_hint,
-        words=words if isinstance(words, list) else None,
+        words=use_words,
     )

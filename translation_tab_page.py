@@ -119,6 +119,71 @@ def _trim_session_text(s: str) -> str:
     return s[:_SESSION_TEXT_LIMIT] + "\n\n[… 超出保存上限，部分内容未写入会话文件 …]"
 
 
+def postprocess_target_text_for_codes(
+    text: str,
+    source_text: str,
+    src_code: str,
+    tgt_code: str,
+    *,
+    already_postprocessed: bool = False,
+) -> str:
+    """译文后处理（可在后台线程调用，不访问 Qt 控件）。"""
+    from argostranslategui.gui import _import_translation_quality_module
+
+    t = text or ""
+    tq = _import_translation_quality_module()
+    if tq is None:
+        return t
+    src_code = (src_code or "").strip().lower()
+    tgt_code = (tgt_code or "").strip().lower()
+    src_plain = source_text or ""
+    if tgt_code in ("zh", "zt", "cn") and src_code in ("ru", "uk"):
+        try:
+            import slavic_to_zh_enhance as stz
+
+            t = stz.postprocess_slavic_to_zh(
+                t, src_code, source_text=src_plain
+            )
+            try:
+                from corpus_pipeline.glossary_coverage import measure_slavic_to_zh
+
+                measure_slavic_to_zh(src_plain, t, src_code)
+            except ImportError:
+                pass
+        except ImportError:
+            pass
+    if tgt_code in ("ru", "uk"):
+        skip_heavy = already_postprocessed and src_code in ("zh", "zt", "cn")
+        if skip_heavy:
+            if hasattr(tq, "touchup_cyrillic_target_spacing"):
+                t = tq.touchup_cyrillic_target_spacing(t)
+            if src_code in ("zh", "zt", "cn") and hasattr(
+                tq, "_apply_zh_ni_ty_pronoun_fix"
+            ):
+                t = tq._apply_zh_ni_ty_pronoun_fix(src_plain, t, tgt_code)
+        else:
+            try:
+                import slavic_translation_enhance as ste
+
+                t = ste.postprocess_argos_target(
+                    t,
+                    src_code,
+                    tgt_code,
+                    source_text=src_plain,
+                )
+            except ImportError:
+                if hasattr(tq, "postprocess_translation_target"):
+                    t = tq.postprocess_translation_target(
+                        t,
+                        tgt_code,
+                        source_text=src_plain,
+                        source_lang_code=src_code,
+                    )
+                elif hasattr(tq, "touchup_cyrillic_target_spacing"):
+                    t = tq.touchup_cyrillic_target_spacing(t)
+    return t
+
+
 class SegmentedTranslationThread(QThread):
     """分句模式：在后台逐行翻译。"""
 
@@ -223,6 +288,14 @@ class TranslationTabPage(QWidget):
         )
         self._chk_segmented.toggled.connect(self._toggle_segmented_mode)
 
+        self._chk_use_glossary = QCheckBox("术语库")
+        self._chk_use_glossary.setChecked(True)
+        self._chk_use_glossary.setToolTip(
+            "翻译时应用术语库中的指定译法；"
+            "关闭后按模型自由翻译（不强制术语）"
+        )
+        self._chk_use_glossary.toggled.connect(self._on_glossary_toggle_changed)
+
         lang_bar = QFrame()
         lang_bar.setObjectName("LangBar")
         lang_row = QHBoxLayout(lang_bar)
@@ -234,6 +307,7 @@ class TranslationTabPage(QWidget):
         self.right_language_combo.currentIndexChanged.connect(self._on_lang_combo_changed)
         self.language_swap_button.clicked.connect(self.swap_languages_button_clicked)
         self._populate_lang_row(lang_row)
+        lang_row.addWidget(self._chk_use_glossary)
         lang_row.addWidget(self._chk_segmented)
         layout.addWidget(lang_bar)
 
@@ -254,7 +328,7 @@ class TranslationTabPage(QWidget):
         self.left_textEdit.setPlaceholderText(_src_ph)
         self._translate_debounce = QTimer(self)
         self._translate_debounce.setSingleShot(True)
-        self._translate_debounce.setInterval(200)
+        self._translate_debounce.setInterval(280)
         self._translate_debounce.timeout.connect(self.translate)
         self._char_count_debounce = QTimer(self)
         self._char_count_debounce.setSingleShot(True)
@@ -545,6 +619,7 @@ class TranslationTabPage(QWidget):
             "right_lang_code": rc,
             "speech_prefs": copy.deepcopy(self._get_speech_audio_prefs()),
             "segmented_mode": self._segmented_mode,
+            "use_glossary": self._chk_use_glossary.isChecked(),
         }
 
     def apply_session_state(self, state: dict[str, Any]) -> None:
@@ -565,6 +640,11 @@ class TranslationTabPage(QWidget):
         self._chk_segmented.blockSignals(True)
         self._chk_segmented.setChecked(segmented)
         self._chk_segmented.blockSignals(False)
+        if "use_glossary" in state:
+            use_gloss = bool(state.get("use_glossary"))
+            self._chk_use_glossary.blockSignals(True)
+            self._chk_use_glossary.setChecked(use_gloss)
+            self._chk_use_glossary.blockSignals(False)
         self._apply_segmented_mode_ui(segmented, migrate_targets=False)
         if segmented:
             src_lines = (src if isinstance(src, str) else "").split("\n")
@@ -725,41 +805,85 @@ class TranslationTabPage(QWidget):
             _is_zh_family_source,
         )
 
-        try:
-            import translation_memory as tm
-
-            tm_ratio = None
-            if (fc or "").strip().lower() in ("zh", "zt", "cn"):
-                import os
-
-                tm_ratio = float(os.environ.get("ARGOS_TM_MIN_RATIO_ZH", "0.90"))
-            tm_hit = tm.lookup(
-                input_text_raw,
-                fc,
-                tc,
-                min_ratio=tm_ratio,
-            )
-            if tm_hit is not None:
-                tm.append_hit_log(tm_hit, query=input_text_raw)
-                self._target_postprocess_done = True
-                self._pending_glossary_spans = []
-                return tm_hit.target_text
-        except ImportError:
-            pass
-
         tq = _import_translation_quality_module()
         if tq is not None and hasattr(tq, "sanitize_source_text"):
             input_text_raw = tq.sanitize_source_text(
                 input_text_raw, for_llm=False
             )
         source_snapshot = input_text_raw
+
+        try:
+            import argos_inference_tuning as ait
+            from slavic_translation_hints import is_zh_to_slavic
+
+            _ultra_short = ait.is_ultra_short_text(source_snapshot)
+        except ImportError:
+            _ultra_short = len((source_snapshot or "").strip()) <= 16
+
+        if _ultra_short and tb is not None and hasattr(
+            tb, "prefers_full_decode_for_zh_slavic"
+        ):
+            try:
+                if tb.prefers_full_decode_for_zh_slavic(
+                    source_snapshot, fc, tc
+                ):
+                    _ultra_short = False
+            except Exception:
+                pass
+
+        if _ultra_short:
+            try:
+                from slavic_translation_hints import is_zh_to_slavic
+
+                if is_zh_to_slavic(fc, tc):
+                    import slavic_idioms as si
+
+                    direct = si.ultra_short_zh_slavic_direct(source_snapshot, tc)
+                    if direct:
+                        self._target_postprocess_done = True
+                        self._pending_glossary_spans = []
+                        return direct
+            except ImportError:
+                pass
+
+        if not _ultra_short:
+            try:
+                import translation_memory as tm
+
+                tm_ratio = None
+                if (fc or "").strip().lower() in ("zh", "zt", "cn"):
+                    import os
+
+                    tm_ratio = float(os.environ.get("ARGOS_TM_MIN_RATIO_ZH", "0.90"))
+                tm_hit = tm.lookup(
+                    input_text_raw,
+                    fc,
+                    tc,
+                    min_ratio=tm_ratio,
+                )
+                if tm_hit is not None:
+                    tm.append_hit_log(tm_hit, query=input_text_raw)
+                    self._target_postprocess_done = True
+                    self._pending_glossary_spans = []
+                    return self._finalize_zh_slavic_output(
+                        tm_hit.target_text,
+                        source_snapshot,
+                        fc,
+                        tc,
+                        use_glossary=use_glossary,
+                        tb=tb,
+                        translation=translation,
+                    )
+            except ImportError:
+                pass
+
         zh_family = (
             tb.is_chinese_source_language(fc)
             if tb is not None and hasattr(tb, "is_chinese_source_language")
             else _is_zh_family_source(fc)
         )
         tgt_code = (tc or "").strip().lower()
-        if zh_family:
+        if zh_family and not _ultra_short:
             try:
                 import slavic_translation_enhance as ste
 
@@ -781,6 +905,8 @@ class TranslationTabPage(QWidget):
                 input_text_raw = bm.prepare_long_translation_input(
                     input_text_raw, for_llm=False
                 )
+        elif zh_family and tq is not None and hasattr(tq, "normalize_zh_for_mt"):
+            input_text_raw = tq.normalize_zh_for_mt(input_text_raw)
         try:
             import slavic_translation_enhance as ste
 
@@ -803,11 +929,46 @@ class TranslationTabPage(QWidget):
             self._pending_glossary_spans = gloss_spans
         else:
             self._pending_glossary_spans = []
-            prep = self._prepare_argos_translate_input(
-                input_text_raw, fc, tc, tb=tb, bm=bm
+            if _ultra_short:
+                raw = translation.translate(input_text_raw)
+            else:
+                prep = self._prepare_argos_translate_input(
+                    input_text_raw, fc, tc, tb=tb, bm=bm
+                )
+                raw = translation.translate(prep)
+        if _ultra_short:
+            try:
+                import argos_quality_guard as aqg
+
+                result = aqg.ensure_quality(
+                    raw,
+                    source_snapshot,
+                    fc,
+                    tc,
+                    translation,
+                    prepare_fn=lambda s: s,
+                )
+            except ImportError:
+                result = raw
+            self._target_postprocess_done = True
+            out = (result or raw).strip()
+            out = postprocess_target_text_for_codes(
+                out,
+                source_snapshot,
+                fc,
+                tc,
+                already_postprocessed=True,
             )
-            raw = translation.translate(prep)
-        return self._apply_quality_guard(
+            return self._finalize_zh_slavic_output(
+                out,
+                source_snapshot,
+                fc,
+                tc,
+                use_glossary=use_glossary,
+                tb=tb,
+                translation=translation,
+            )
+        result = self._apply_quality_guard(
             raw,
             source_snapshot,
             fc,
@@ -816,6 +977,86 @@ class TranslationTabPage(QWidget):
             tb=tb,
             bm=bm,
         )
+        already = bool(getattr(self, "_target_postprocess_done", False))
+        result = postprocess_target_text_for_codes(
+            result,
+            source_snapshot,
+            fc,
+            tc,
+            already_postprocessed=already,
+        )
+        self._target_postprocess_done = True
+        return self._finalize_zh_slavic_output(
+            result,
+            source_snapshot,
+            fc,
+            tc,
+            use_glossary=use_glossary,
+            tb=tb,
+            translation=translation,
+        )
+
+    def _finalize_zh_slavic_output(
+        self,
+        result: str,
+        source_text: str,
+        from_code: str,
+        to_code: str,
+        *,
+        use_glossary: bool,
+        tb,
+        translation=None,
+    ) -> str:
+        """质量重译后补术语；源文「你」→ 俄语 ты（不经过 skip_heavy 丢失）。"""
+        out = (result or "").strip()
+        fc = (from_code or "").strip().lower()
+        tc = (to_code or "").strip().lower()
+        if use_glossary and tb is not None and hasattr(tb, "enforce_glossary_in_target"):
+            try:
+                if tb.should_apply_glossary(fc, tc):
+                    out = tb.enforce_glossary_in_target(
+                        source_text, out, fc, tc
+                    )
+            except Exception:
+                pass
+        if (
+            translation is not None
+            and tb is not None
+            and hasattr(tb, "ensure_zh_to_slavic_translation_complete")
+        ):
+            try:
+                from argostranslategui.gui import _is_zh_family_source
+
+                zh = (
+                    tb.is_chinese_source_language(fc)
+                    if hasattr(tb, "is_chinese_source_language")
+                    else _is_zh_family_source(fc)
+                )
+                if zh and tc in ("ru", "uk"):
+                    out = tb.ensure_zh_to_slavic_translation_complete(
+                        source_text,
+                        out,
+                        fc,
+                        tc,
+                        translation,
+                        use_glossary=use_glossary,
+                    )
+            except Exception:
+                pass
+        try:
+            from argostranslategui.gui import _is_zh_family_source
+            import translation_quality as tq
+
+            zh = (
+                tb.is_chinese_source_language(fc)
+                if tb is not None and hasattr(tb, "is_chinese_source_language")
+                else _is_zh_family_source(fc)
+            )
+            if zh and tc in ("ru", "uk") and hasattr(tq, "_apply_zh_ni_ty_pronoun_fix"):
+                out = tq._apply_zh_ni_ty_pronoun_fix(source_text, out, tc)
+        except Exception:
+            pass
+        return out
 
     def _schedule_char_count_update(self) -> None:
         self._char_count_debounce.start()
@@ -979,10 +1220,54 @@ class TranslationTabPage(QWidget):
 
         QThreadPool.globalInstance().start(_Job())
 
+    def _on_glossary_toggle_changed(self, _checked: bool) -> None:
+        self.translate()
+
+    def _refresh_glossary_toggle(self) -> None:
+        from argostranslategui.gui import _get_terminology_bridge
+
+        li = self.left_language_combo.currentIndex()
+        ri = self.right_language_combo.currentIndex()
+        L = self._language_at_combo_index(li)
+        R = self._language_at_combo_index(ri)
+        fc = (getattr(L, "code", None) or "").strip().lower() if L else ""
+        tc = (getattr(R, "code", None) or "").strip().lower() if R else ""
+        tb = _get_terminology_bridge()
+        supported = bool(
+            fc
+            and tc
+            and tb is not None
+            and hasattr(tb, "should_apply_glossary")
+            and tb.should_apply_glossary(fc, tc)
+        )
+        self._chk_use_glossary.setEnabled(supported)
+        if supported:
+            self._chk_use_glossary.setToolTip(
+                "翻译时应用术语库中的指定译法；"
+                "关闭后按模型自由翻译（不强制术语）"
+            )
+        else:
+            self._chk_use_glossary.setToolTip(
+                "当前语言对无可用术语译文，或未配置术语库"
+            )
+
+    def _resolve_use_glossary(
+        self,
+        from_code: str,
+        to_code: str,
+        tb,
+    ) -> bool:
+        if not self._chk_use_glossary.isChecked():
+            return False
+        if tb is None or not hasattr(tb, "should_apply_glossary"):
+            return False
+        return bool(tb.should_apply_glossary(from_code, to_code))
+
     def _on_lang_combo_changed(self, _index: int = 0) -> None:
         sender = self.sender()
         if sender in (self.left_language_combo, self.right_language_combo):
             self._update_language_combo_display_font(sender)
+        self._refresh_glossary_toggle()
         self.refresh_tab_title()
         self._maybe_upgrade_word_lookup_text_edits()
         self._warmup_current_language_pair()
@@ -1062,6 +1347,7 @@ class TranslationTabPage(QWidget):
         self.apply_restored_language_codes()
         self._update_language_combo_display_font(self.left_language_combo)
         self._update_language_combo_display_font(self.right_language_combo)
+        self._refresh_glossary_toggle()
         self.refresh_tab_title()
         self._maybe_upgrade_word_lookup_text_edits()
         if run_translate:
@@ -1090,6 +1376,7 @@ class TranslationTabPage(QWidget):
             if sm is not None:
                 self._refresh_speech_audio_combos(sm)
         self.refresh_tab_title()
+        self._refresh_glossary_toggle()
         self._update_char_counts()
 
     def _deferred_init_speech_controls(self) -> None:
@@ -1598,66 +1885,21 @@ class TranslationTabPage(QWidget):
         anim.start(QAbstractAnimation.DeleteWhenStopped)
 
     def _postprocess_target_text(self, text: str, source_text: str) -> str:
-        from argostranslategui.gui import _import_translation_quality_module
-
-        t = text or ""
-        tq = _import_translation_quality_module()
-        if tq is None:
-            return t
-        R = self._language_at_combo_index(self.right_language_combo.currentIndex())
         L = self._language_at_combo_index(self.left_language_combo.currentIndex())
+        R = self._language_at_combo_index(self.right_language_combo.currentIndex())
         src_code = (L.code or "").strip().lower() if L else ""
-        src_plain = source_text or ""
-        if R is None:
-            return t
-        code = (R.code or "").strip().lower()
-        if code in ("zh", "zt", "cn") and src_code in ("ru", "uk"):
-            try:
-                import slavic_to_zh_enhance as stz
-
-                t = stz.postprocess_slavic_to_zh(
-                    t, src_code, source_text=src_plain
-                )
-                try:
-                    from corpus_pipeline.glossary_coverage import (
-                        measure_slavic_to_zh,
-                    )
-
-                    measure_slavic_to_zh(src_plain, t, src_code)
-                except ImportError:
-                    pass
-            except ImportError:
-                pass
-        if code in ("ru", "uk"):
-            skip_heavy = (
+        tgt_code = (R.code or "").strip().lower() if R else ""
+        if not tgt_code:
+            return text or ""
+        return postprocess_target_text_for_codes(
+            text,
+            source_text,
+            src_code,
+            tgt_code,
+            already_postprocessed=bool(
                 getattr(self, "_target_postprocess_done", False)
-                and src_code in ("zh", "zt", "cn")
-            )
-            if skip_heavy:
-                self._target_postprocess_done = False
-                if hasattr(tq, "touchup_cyrillic_target_spacing"):
-                    t = tq.touchup_cyrillic_target_spacing(t)
-            else:
-                try:
-                    import slavic_translation_enhance as ste
-
-                    t = ste.postprocess_argos_target(
-                        t,
-                        src_code,
-                        code,
-                        source_text=src_plain,
-                    )
-                except ImportError:
-                    if hasattr(tq, "postprocess_translation_target"):
-                        t = tq.postprocess_translation_target(
-                            t,
-                            code,
-                            source_text=src_plain,
-                            source_lang_code=src_code,
-                        )
-                    elif hasattr(tq, "touchup_cyrillic_target_spacing"):
-                        t = tq.touchup_cyrillic_target_spacing(t)
-        return t
+            ),
+        )
 
     def _translate_segmented(self) -> None:
         from argostranslategui.gui import (
@@ -1710,16 +1952,10 @@ class TranslationTabPage(QWidget):
             return
 
         tb = _get_terminology_bridge()
-        use_glossary = (
-            tb is not None
-            and hasattr(tb, "should_apply_glossary")
-            and tb.should_apply_glossary(
-                input_language.code, output_language.code
-            )
-        )
-        bm = _import_bulk_text_module()
         fc = input_language.code
         tc = output_language.code
+        use_glossary = self._resolve_use_glossary(fc, tc, tb)
+        bm = _import_bulk_text_module()
         src_key = self._translation_source_key("\n".join(lines), fc, tc)
         if (
             not self._translate_reschedule
@@ -1736,7 +1972,6 @@ class TranslationTabPage(QWidget):
         tab = self
 
         def translate_one(raw_line: str) -> tuple[str, list]:
-            tab._target_postprocess_done = False
             out = tab._translate_in_worker(
                 raw_line,
                 fc,
@@ -1748,7 +1983,7 @@ class TranslationTabPage(QWidget):
             )
             spans = list(getattr(tab, "_pending_glossary_spans", []) or [])
             tab._pending_glossary_spans = []
-            t = tab._postprocess_target_text(out, raw_line)
+            t = out
             if use_glossary and spans:
                 try:
                     import terminology_bridge as tb_mod
@@ -1871,14 +2106,6 @@ class TranslationTabPage(QWidget):
             error("当前语言对没有可用的翻译模型。")
             return
         tb = _get_terminology_bridge()
-        use_glossary = (
-            tb is not None
-            and hasattr(tb, "should_apply_glossary")
-            and tb.should_apply_glossary(
-                input_language.code, output_language.code
-            )
-        )
-        bm = _import_bulk_text_module()
         fc = input_language.code
         tc = output_language.code
         source_snapshot = input_text_raw
@@ -1890,12 +2117,46 @@ class TranslationTabPage(QWidget):
         ):
             return
 
+        try:
+            import argos_inference_tuning as ait
+            from slavic_translation_hints import is_zh_to_slavic
+
+            if ait.is_ultra_short_text(source_snapshot) and is_zh_to_slavic(fc, tc):
+                import slavic_idioms as si
+
+                direct = si.ultra_short_zh_slavic_direct(source_snapshot, tc)
+                if direct:
+                    self._translate_seq += 1
+                    self._target_postprocess_done = True
+                    self._translate_reschedule = False
+                    self._stop_translate_debounce_timers()
+                    self._set_feedback_message("")
+                    self._pending_glossary_spans = []
+                    self.update_right_textEdit(direct)
+                    self._last_translate_key = src_key
+                    return
+        except ImportError:
+            pass
+
+        use_glossary = self._resolve_use_glossary(
+            input_language.code, output_language.code, tb
+        )
+
+        bm = _import_bulk_text_module()
+
         self._translate_seq += 1
         seq = self._translate_seq
         self._target_postprocess_done = False
         self._translate_reschedule = False
         self._stop_translate_debounce_timers()
         self._set_feedback_message("正在翻译…")
+        try:
+            import argos_inference_tuning as ait
+
+            if ait.is_ultra_short_text(source_snapshot):
+                self._show_translating_status()
+        except ImportError:
+            pass
         tab = self
 
         def bound() -> str:
@@ -1957,13 +2218,24 @@ class TranslationTabPage(QWidget):
             self._update_char_counts()
             return
         src_plain = self.left_textEdit.toPlainText() or ""
-        t = self._postprocess_target_text(t, src_plain)
+        self._target_postprocess_done = False
         spans = list(getattr(self, "_pending_glossary_spans", []) or [])
         self._pending_glossary_spans = []
         try:
             import terminology_bridge as tb
 
             spans = tb.relocate_glossary_spans(t, spans)
+            if not spans:
+                li = self.left_language_combo.currentIndex()
+                ri = self.right_language_combo.currentIndex()
+                L = self._language_at_combo_index(li)
+                R = self._language_at_combo_index(ri)
+                fc = (getattr(L, "code", None) or "").strip().lower() if L else ""
+                tc = (getattr(R, "code", None) or "").strip().lower() if R else ""
+                if fc and tc:
+                    spans = tb.find_glossary_spans_in_target(
+                        src_plain, t, fc, tc
+                    )
         except ImportError:
             pass
         if hasattr(self.right_textEdit, "set_glossary_translation"):

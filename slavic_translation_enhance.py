@@ -75,6 +75,10 @@ def postprocess_depth(
     src = source_text or text
     tier = ait.text_tier(src)
     tlen = len((text or "").strip())
+    if ait.is_ultra_short_text(src) or (tier == "short" and tlen <= 16):
+        if is_zh_to_slavic(from_code or "", to_code or ""):
+            return "fast"
+        return "fast"
     if tier == "short" and tlen < 120:
         if is_zh_to_slavic(from_code or "", to_code or ""):
             return "short"
@@ -168,6 +172,14 @@ def postprocess_argos_target(
                         tgt,
                         domain=detect_domain(source_text),
                     )
+            except ImportError:
+                pass
+        if is_zh_to_slavic(src, tgt) and source_text:
+            try:
+                import slavic_idioms as si
+
+                if si.slavic_idiom_fix_enabled():
+                    text = si.apply_zh_greeting_fix(source_text, text, tgt)
             except ImportError:
                 pass
         return text

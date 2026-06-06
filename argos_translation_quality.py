@@ -239,7 +239,7 @@ def _score_core(
         issues.append("heavy_cjk_residue")
         score -= min(0.45, 0.08 * cjk_out)
 
-    if zh_n >= 8 and code in ("ru", "uk"):
+    if zh_n >= 6 and code in ("ru", "uk"):
         ratio = 0.35
         try:
             import argos_inference_tuning as ait
@@ -476,6 +476,36 @@ def pick_best_candidate(
     return best_c
 
 
+def postprocess_zh_slavic_ultra_short(
+    text: str,
+    source_text: str,
+    from_code: str,
+    to_code: str,
+) -> str:
+    """极短句：问候/常用语轻量修补，跳过变格与重译链。"""
+    if not text or not is_zh_to_slavic(from_code, to_code):
+        return text
+    out = (text or "").strip()
+    code = (to_code or "").strip().lower()
+    src = source_text or ""
+    try:
+        import slavic_idioms as si
+
+        if si.slavic_idiom_fix_enabled():
+            out = si.apply_zh_greeting_fix(src, out, code)
+            out = si.apply_zh_source_idiom_hints(src, out, code)
+    except ImportError:
+        pass
+    try:
+        import translation_quality as tq
+
+        if hasattr(tq, "touchup_cyrillic_target_spacing"):
+            out = tq.touchup_cyrillic_target_spacing(out)
+    except ImportError:
+        pass
+    return out.strip() if out else out
+
+
 def postprocess_zh_slavic_output(
     text: str,
     source_text: str,
@@ -485,6 +515,15 @@ def postprocess_zh_slavic_output(
     """完整 Argos 强化链（与界面 update_right_textEdit 一致）。"""
     if not text or not is_zh_to_slavic(from_code, to_code):
         return text
+    try:
+        import argos_inference_tuning as ait
+
+        if ait.is_ultra_short_text(source_text):
+            return postprocess_zh_slavic_ultra_short(
+                text, source_text, from_code, to_code
+            )
+    except ImportError:
+        pass
     out = text
     try:
         import slavic_translation_enhance as ste

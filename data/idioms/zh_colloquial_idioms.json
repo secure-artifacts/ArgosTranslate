@@ -3,6 +3,11 @@
     "description": "口语/日常中文 → 俄乌自然表达（源文含对应短语时用于 calque 修补）"
   },
   "zh_ru": [
+    {"zh": "你好", "ru": "Привет!", "note": "hello — not Добрый день (afternoon)"},
+    {"zh": "您好", "ru": "Здравствуйте!", "note": "formal hello"},
+    {"zh": "下午好", "ru": "Добрый день!", "note": "good afternoon"},
+    {"zh": "早上好", "ru": "Доброе утро!", "note": "good morning"},
+    {"zh": "晚上好", "ru": "Добрый вечер!", "note": "good evening"},
     {
       "zh": "说话比较直接",
       "ru": "говорит прямолинейно",
@@ -40,6 +45,9 @@
     }
   ],
   "zh_uk": [
+    {"zh": "你好", "uk": "Привіт!", "note": "hello — not Добрий день"},
+    {"zh": "您好", "uk": "Вітаю!", "note": "formal hello"},
+    {"zh": "下午好", "uk": "Добрий день!", "note": "good afternoon"},
     {
       "zh": "说话比较直接",
       "uk": "говорить прямолінійно",

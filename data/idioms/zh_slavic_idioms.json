@@ -8,6 +8,12 @@
     "description": "Chinese source phrase hints → Russian/Ukrainian idiomatic targets (post-check when source available)"
   },
   "zh_ru": [
+    {"zh": "你好", "ru": "Привет!", "note": "Tatoeba — not Добрый день"},
+    {"zh": "您好", "ru": "Здравствуйте!", "note": "formal hello"},
+    {"zh": "下午好", "ru": "Добрый день!", "note": "good afternoon"},
+    {"zh": "早上好", "ru": "Доброе утро!", "note": "good morning"},
+    {"zh": "晚上好", "ru": "Добрый вечер!", "note": "good evening"},
+    {"zh": "谢谢", "ru": "Спасибо!", "note": "Tatoeba"},
     {"zh": "没关系", "ru": "ничего страшного", "note": "Tatoeba"},
     {"zh": "不用谢", "ru": "не за что", "note": "Tatoeba"},
     {"zh": "怎么办", "ru": "что делать", "note": "Wiktionary idiom pattern"},

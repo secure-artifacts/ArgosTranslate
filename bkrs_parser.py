@@ -8,7 +8,7 @@ import json
 import re
 import time
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -16,7 +16,8 @@ from bs4 import BeautifulSoup
 from terminology_bridge import portable_root
 
 BKRS_BASE = "https://bkrs.info/"
-CACHE_PATH = portable_root() / "data" / "cache" / "bkrs_lookup_cache_v5.json"
+CACHE_PATH = portable_root() / "data" / "cache" / "bkrs_lookup_cache_v6.json"
+DERIV_CACHE_PATH = portable_root() / "data" / "cache" / "bkrs_derivatives_cache_v1.json"
 _SESSION = requests.Session()
 _SESSION.headers.update(
     {
@@ -26,6 +27,8 @@ _SESSION.headers.update(
 )
 _CACHE: dict[str, Any] = {}
 _CACHE_LOADED = False
+_DERIV_CACHE: dict[str, Any] = {}
+_DERIV_CACHE_LOADED = False
 _CA_COOKIE: str | None = None
 
 _HAN_RE = re.compile(r"[\u3400-\u9fff]")
@@ -65,6 +68,150 @@ def _write_cache() -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(_CACHE, f, ensure_ascii=False, indent=2)
     tmp.replace(CACHE_PATH)
+
+
+def _ensure_deriv_cache() -> None:
+    global _DERIV_CACHE, _DERIV_CACHE_LOADED
+    if _DERIV_CACHE_LOADED:
+        return
+    _DERIV_CACHE_LOADED = True
+    if DERIV_CACHE_PATH.is_file():
+        try:
+            with open(DERIV_CACHE_PATH, "r", encoding="utf-8") as f:
+                _DERIV_CACHE = json.load(f)
+            if not isinstance(_DERIV_CACHE, dict):
+                _DERIV_CACHE = {}
+        except (json.JSONDecodeError, OSError):
+            _DERIV_CACHE = {}
+
+
+def _write_deriv_cache() -> None:
+    DERIV_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = DERIV_CACHE_PATH.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(_DERIV_CACHE, f, ensure_ascii=False, indent=2)
+    tmp.replace(DERIV_CACHE_PATH)
+
+
+def assert_single_word_query(word: str) -> str:
+    """
+    联网查询仅允许单个词条（不含空格整句、不含中文）。
+    句子级分析必须在本地完成，不得把上下文上传到网络。
+    """
+    clean = _clean_word(word)
+    if not clean:
+        raise ValueError("empty word")
+    if _HAN_RE.search(clean):
+        raise ValueError("CJK in network query")
+    if len(clean) > 64:
+        raise ValueError("query too long")
+    if re.search(r"[\s;；,，/\\|]", clean):
+        raise ValueError("multi-token query forbidden")
+    return clean
+
+
+def _lemma_from_bkrs_href(href: str) -> str:
+    try:
+        q = parse_qs(urlparse(href or "").query)
+        ch = (q.get("ch") or [""])[0]
+        if ch:
+            return _clean_word(unquote(ch))
+    except (ValueError, TypeError):
+        pass
+    return ""
+
+
+def _parse_bkrs_link_box(box: BeautifulSoup | None, section: str) -> list[str]:
+    if not box:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for a in box.find_all("a", href=True):
+        href = a.get("href") or ""
+        if "slovo.php" not in href:
+            continue
+        lem = _lemma_from_bkrs_href(href)
+        if not lem:
+            lem = _clean_word(re.sub(r"\s+", "", a.get_text(" ", strip=True)))
+        if not lem or lem in seen:
+            continue
+        if re.search(r"\s", lem) or " - " in lem:
+            continue
+        if len(_CYR_RE.findall(lem)) < 2:
+            continue
+        seen.add(lem)
+        out.append(lem)
+    return out
+
+
+def parse_derivatives_from_soup(soup: BeautifulSoup) -> dict[str, list[str]]:
+    """解析 bkrs 词条页派生/关联词（ссылки с、слова с、сателлиты）。"""
+    sats_box = soup.find("div", id="sats") or soup.find("div", class_="pt14")
+    return {
+        "links_from": _parse_bkrs_link_box(soup.find("div", id="backlinks"), "links_from"),
+        "words_with": _parse_bkrs_link_box(
+            soup.find("div", id="words_start_with"), "words_with"
+        ),
+        "satellites": _parse_bkrs_link_box(sats_box, "satellites"),
+    }
+
+
+def lookup_russian_derivatives(word: str, timeout: float = 14.0) -> dict[str, Any]:
+    """
+    仅向 bkrs.info 查询单个俄语词，返回派生词列表（磁盘缓存）。
+    禁止传入短语或含中文的字符串。
+    """
+    clean = assert_single_word_query(word)
+    key = clean.lower()
+    _ensure_deriv_cache()
+    if key in _DERIV_CACHE:
+        hit = dict(_DERIV_CACHE[key])
+        hit["queried"] = clean
+        return hit
+
+    time.sleep(0.15)
+    out: dict[str, Any] = {
+        "source": "bkrs.info",
+        "queried": clean,
+        "lemma": clean,
+        "derivatives": [],
+        "sections": {},
+        "bkrs_url": _slovo_url(clean),
+        "error": None,
+    }
+    try:
+        html = _fetch_html(clean, timeout)
+        soup = _soup(html)
+        sections = parse_derivatives_from_soup(soup)
+        out["sections"] = sections
+        flat: list[str] = []
+        seen: set[str] = set()
+        for sec in ("words_with", "links_from", "satellites"):
+            for w in sections.get(sec) or []:
+                lw = w.casefold()
+                if lw in seen or lw == key:
+                    continue
+                seen.add(lw)
+                flat.append(w)
+        out["derivatives"] = flat
+        title = soup.find("div", id="ru_ru")
+        if title:
+            out["lemma"] = (title.get_text(strip=True) or clean).strip() or clean
+        morph_lem = _lemma_from_page(soup)
+        if morph_lem:
+            out["lemma"] = morph_lem
+    except ValueError as e:
+        out["error"] = str(e)
+    except Exception as e:
+        out["source"] = "fetch_error"
+        out["error"] = str(e)
+
+    _DERIV_CACHE[key] = {k: v for k, v in out.items() if k != "queried"}
+    try:
+        _write_deriv_cache()
+    except OSError:
+        pass
+    return out
 
 
 def _clean_word(word: str) -> str:
@@ -445,6 +592,10 @@ def lookup_russian_word(word: str, timeout: float = 14.0) -> dict[str, Any]:
 
         out["lemma"] = lemma
         out["definition_lines"] = lines
+        try:
+            out["derivatives"] = parse_derivatives_from_soup(soup)
+        except Exception:
+            out["derivatives"] = {}
         if not lines:
             out["error"] = "未解析到中文义项"
     except Exception as e:
